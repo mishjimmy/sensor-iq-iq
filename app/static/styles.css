@@ -90,7 +90,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--
 .empty-state { padding: 40px; text-align: center; color: var(--muted); background: var(--surface);
   border: 1px dashed var(--border); border-radius: var(--radius); }
 
-.panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap: 14px; }
+.panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 14px; align-items: start; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .card.offline { border-color: var(--offline); }
 .card-head { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
@@ -100,12 +100,21 @@ label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--
 .card-head .totals .trip { color: var(--trip); margin-left: 10px; }
 .card-errors { padding: 6px 14px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
 .card-errors summary { cursor: pointer; }
-.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; padding: 10px; }
-.slot { border-radius: 6px; padding: 5px 7px; min-height: 50px; border: 1px solid transparent; cursor: default;
-  display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums; }
-.slot .id { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 4px; }
-.slot .amps { font-size: 15px; font-weight: 650; }
-.slot .room { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* relay-panel schedule: odd slots left, even right, circuit numbers meet at the centre bus */
+.slots { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 3px; padding: 10px;
+  background: linear-gradient(var(--border), var(--border)) center / 2px 100% no-repeat; background-origin: content-box; }
+.slot { border-radius: 4px; padding: 0 7px; height: 24px; border: 1px solid transparent; cursor: default; min-width: 0;
+  display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.slot.right { justify-content: flex-start; }
+.slot .id { font-size: 11px; color: var(--muted); flex: 0 0 auto; min-width: 30px; }
+.slot.left .id { text-align: right; }
+.slot .amps { font-size: 13px; font-weight: 650; flex: 0 0 auto; min-width: 40px; }
+.slot.left .amps { text-align: right; }
+.slot .room { font-size: 11px; color: var(--muted); flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot.left .room { text-align: left; }
+.slot.right .room { text-align: right; }
+.slot.none { visibility: hidden; }
 .slot.on { background: var(--on-bg); border-color: color-mix(in srgb, var(--on) 40%, transparent); }
 .slot.on .amps { color: var(--on); }
 .slot.off { background: var(--off-bg); }

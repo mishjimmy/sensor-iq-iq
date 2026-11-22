@@ -37,6 +37,7 @@ cp panels.yaml.example panels.yaml    # or start empty and add panels in the UI
    ADMIN_TOKEN=<long random string>
    ```
    The image already sets `PANELS_FILE=/data/panels.yaml` and `HISTORY_DB=/data/history.db`.
+   **Don't set them yourself.** A relative value such as `panels.yaml` points outside the volume, and the container can't write there.
 3. **Advanced → Volumes**: add a **named volume** (e.g. `sensoriq-data`) mounted at **`/data`**.
    - Use a directory volume, **not** a File Mount of `panels.yaml`. The UI saves that file by atomic rename, which fails on a single-file bind mount.
    - Without the volume, panels and history are lost on every redeploy.
@@ -124,14 +125,14 @@ These were created once and are owned by this service:
 
 | Table | Key | Columns |
 |---|---|---|
-| `Panel_Circuit_Live` | `Circuit` | Panel_No, Circuit_No, Status (on/off/tripped/empty/offline), Current_A, Power_W, Voltage, Panel_Name, Updated_At (last change) |
+| `Panel_Circuit_Live` | `Circuit` | Panel_No, Circuit_No, Status (on/off/tripped/empty/offline), Current_A, Power_W, Voltage, Panel_Name, Updated_At (last change), Raw (the panel's full `/api/outputs` JSON for the slot) |
 | `Panel_Live` | `Panel_No` | Name, IP, Room, Online, Last_Seen, Total_A, Tripped_Count, Errors |
 
 These formula columns were added to existing tables. No existing data is written.
 
 | Table | Column | Shows |
 |---|---|---|
-| `Panel_Schedule_Export` | `Live_Status`, `Live_A`, `Live_Updated` | live state of each circuit |
+| `Panel_Schedule_Export` | `Live_Status`, `Live_A`, `Live_Updated`, `Live_Raw` | live state of each circuit, plus the raw panel JSON |
 | `Fixture_Schedule` | `Circuit_Live_Status`, `Circuit_Live_A` | live state of the circuit feeding each fixture |
 
 Status shows `no data` until a panel with that `grist_panel` is configured and synced. When a panel stops answering, the service writes `offline` to all of its circuits. Grist formulas can't time out on their own, so this is how staleness shows up there.

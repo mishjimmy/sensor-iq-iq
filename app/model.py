@@ -24,9 +24,12 @@ class Circuit:
     breaker_type: str = ""
     pole_of: int | None = None  # set on the 2nd+ slot of a multi-pole breaker
     errors: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)  # panel's /api/outputs entry
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("raw")  # kept out of the dashboard snapshot; only sent to Grist
+        return d
 
 
 def slot_status(raw: dict[str, Any]) -> str:
@@ -56,6 +59,7 @@ def normalise_outputs(outputs: list[dict[str, Any]], panel_no: int | None, slot_
             voltage=float(load.get("voltage") or 0),
             breaker_type=raw.get("type") or "",
             errors=[e.get("errorText", "") for e in raw.get("errors") or []],
+            raw=raw,
         )
         poles = int(raw.get("poleCount") or 1)
         for extra in range(1, poles):

@@ -2,6 +2,7 @@
 
 Only writes to the two tables this service owns (Panel_Circuit_Live, Panel_Live).
 """
+import json
 import logging
 import time
 from typing import Any
@@ -33,7 +34,31 @@ def circuit_fields(c: Circuit, panel_no: int, panel_name: str) -> dict[str, Any]
         "Power_W": round(c.power_w),
         "Voltage": round(c.voltage),
         "Panel_Name": panel_name,
+        # everything the panel reported for this slot, verbatim
+        "Raw": json.dumps(c.raw, indent=2) if c.raw else "",
     }
+
+
+def change_signature(fields: dict[str, Any]) -> dict[str, Any]:
+    """What must differ for a row to be re-sent.
+
+    Live load readings (raw mA / mW, Power_W, Voltage) move on nearly every poll; they are left
+    out here so a row only rewrites when something meaningful changes (status, the 0.1 A rounded
+    current, patch, arbitration, errors...). Those readings are therefore as of the last change.
+    """
+    sig = dict(fields)
+    sig.pop("Power_W", None)  # watts and volts flicker every poll; Current_A (0.1 A) stands in for load
+    sig.pop("Voltage", None)
+    raw = sig.pop("Raw", "")
+    if raw:
+        try:
+            r = json.loads(raw)
+            r.pop("load", None)
+            raw = json.dumps(r, sort_keys=True)
+        except ValueError:
+            pass
+    sig["_raw"] = raw
+    return sig
 
 
 class GristClient:
@@ -62,7 +87,7 @@ class GristClient:
         return out
 
     def changed_circuits(self, rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-        return {k: v for k, v in rows.items() if self._sent.get(k) != v}
+        return {k: v for k, v in rows.items() if self._sent.get(k) != change_signature(v)}
 
     async def push_circuits(self, rows: dict[str, dict[str, Any]]) -> int:
         """Upsert only rows whose fields changed since the last successful push."""
@@ -75,7 +100,7 @@ class GristClient:
             chunk = items[i:i + BATCH]
             body = {"records": [{"require": {"Circuit": k}, "fields": {**v, "Updated_At": now}} for k, v in chunk]}
             await self._put(CIRCUIT_TABLE, body)
-            self._sent.update({k: dict(v) for k, v in chunk})
+            self._sent.update({k: change_signature(v) for k, v in chunk})
         return len(changed)
 
     async def push_panels(self, rows: list[dict[str, Any]]) -> None:

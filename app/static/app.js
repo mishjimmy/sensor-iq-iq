@@ -80,7 +80,7 @@ function renderStats() {
 }
 
 // ---- panels view -----------------------------------------------------------
-function slotTile(c, p, f) {
+function slotTile(c, p, f, side) {
   const i = info(c);
   const rooms = i ? i.rooms.join(", ") : "";
   const tip = [
@@ -90,15 +90,37 @@ function slotTile(c, p, f) {
     c.pole_of && `Pole 2 of slot ${c.pole_of}`, c.breaker_type && c.breaker_type !== "None" && c.breaker_type,
     ...(c.errors || []),
   ].filter(Boolean).join("\n");
-  const amps = c.status === "empty" ? "—" : c.status === "offline" ? "?" : c.pole_of ? "⇡" : fmtA(c.current_a);
-  return el("div", { class: `slot ${c.status}${matches(c, p.panel, f) ? "" : " dim"}`, title: tip },
-    el("div", { class: "id" }, el("span", { text: c.circuit || "S" + c.slot }), c.status === "tripped" ? el("span", { text: "TRIP" }) : null),
-    el("div", { class: "amps", text: amps }),
-    el("div", { class: "room", text: rooms }));
+  const amps = c.status === "tripped" ? "TRIP" : c.status === "empty" ? "—" : c.status === "offline" ? "?"
+    : c.pole_of ? "⇡" : fmtA(c.current_a);
+  // like a printed panel schedule: circuit numbers sit next to the centre bus, descriptions on the outside
+  const parts = [el("span", { class: "room", text: rooms }), el("span", { class: "amps", text: amps }),
+    el("span", { class: "id", text: c.circuit || "S" + c.slot })];
+  return el("div", { class: `slot ${side} ${c.status}${matches(c, p.panel, f) ? "" : " dim"}`, title: tip },
+    side === "left" ? parts : parts.reverse());
+}
+
+// two columns like a relay panel: odd slots down the left, even slots down the right
+function panelSchedule(p, f) {
+  const bySlot = new Map(p.circuits.map((c) => [c.slot, c]));
+  const maxSlot = Math.max(0, ...p.circuits.map((c) => c.slot));
+  const rows = [];
+  for (let odd = 1; odd <= maxSlot; odd += 2) {
+    const l = bySlot.get(odd), r = bySlot.get(odd + 1);
+    rows.push(l ? slotTile(l, p, f, "left") : el("div", { class: "slot left none" }),
+      r ? slotTile(r, p, f, "right") : el("div", { class: "slot right none" }));
+  }
+  return el("div", { class: "slots" }, rows);
+}
+
+// online panels first (registry order); offline and disabled ones sink to the bottom
+function panelRank(p) {
+  if (!p.panel.enabled) return 2;
+  return p.polled && !p.online ? 1 : 0;
 }
 
 function renderPanels(f) {
-  const list = state.panels.filter((p) => !f.panel || p.panel.ip === f.panel);
+  const list = state.panels.filter((p) => !f.panel || p.panel.ip === f.panel)
+    .map((p, i) => [p, i]).sort((a, b) => panelRank(a[0]) - panelRank(b[0]) || a[1] - b[1]).map(([p]) => p);
   if (!state.panels.length) {
     $("#view-panels").replaceChildren(el("div", { class: "empty-state" }, "No panels configured yet. ",
       el("a", { href: "/panels", text: "Add a panel" }), " or edit panels.yaml."));
@@ -118,7 +140,7 @@ function renderPanels(f) {
           s.counts.tripped ? el("span", { class: "trip", text: `${s.counts.tripped} tripped` }) : null)),
       errs.length && p.online ? el("details", { class: "card-errors" }, el("summary", { text: `${errs.length} panel alert(s)` }),
         el("div", { text: errs.join(" · ") })) : null,
-      el("div", { class: "slots" }, p.circuits.map((c) => slotTile(c, p, f))));
+      panelSchedule(p, f));
   }));
 }
 

@@ -1,5 +1,6 @@
 """SensorIQ panel monitor: read-only dashboard + Grist live circuit status."""
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,13 +16,34 @@ from .settings import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # don't log every 5 s poll
+
+
+class _SkipHealthz(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/healthz" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SkipHealthz())  # docker HEALTHCHECK every 30 s
 log = logging.getLogger("sensoriq")
 STATIC = Path(__file__).parent / "static"
+
+
+def check_writable(label: str, path: str) -> None:
+    """Fail at startup with a readable message instead of a traceback."""
+    p = Path(path).resolve()
+    target = p if p.exists() else p.parent
+    if not os.access(target, os.W_OK):
+        raise SystemExit(
+            f"{label} is not writable: {p} (running as uid {os.getuid() if hasattr(os, 'getuid') else '?'}).\n"
+            f"In Docker/Dokploy, leave PANELS_FILE and HISTORY_DB unset so they use /data, and mount a "
+            f"named volume at /data. If /data is a host bind mount, chown it to uid 10001.")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    check_writable("PANELS_FILE", settings.panels_file)
+    check_writable("HISTORY_DB", settings.history_db)
     registry = Registry(settings.panels_file)
     if registry.load_error:
         log.error("panels file error: %s", registry.load_error)
