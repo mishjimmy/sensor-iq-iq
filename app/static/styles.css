@@ -138,6 +138,18 @@ button.linkish { border: 0; background: none; padding: 0; font: inherit; color: 
 .legend .on::before { background: var(--on); } .legend .off::before { background: var(--off); }
 .legend .tripped::before { background: var(--trip); } .legend .offline::before { background: var(--offline); }
 .legend .empty::before { border: 1px dashed var(--muted); }
+/* actual vs estimate mode: bar grows from the centre bus, width = actual / estimate */
+.slot.cmp .amps { font-size: 12px; min-width: 64px; }
+.slot.cmp { background-image: linear-gradient(var(--bar, var(--on)), var(--bar, var(--on)));
+  background-repeat: no-repeat; background-size: calc(var(--pct, 0) * 1%) 3px; background-position: left bottom; }
+.slot.left.cmp { background-position: right bottom; }
+.slot.cmp.over { --bar: var(--trip); }
+.slot.cmp.over .amps { color: var(--trip); }
+.slot.cmp.unsched .amps { color: var(--offline); }
+.card-head .totals .est { margin-left: 10px; color: var(--muted); font-weight: 500; font-size: 13px; }
+.card-head .totals .est.over { color: var(--trip); }
+.legend .est-key::before { display: none; }
+.legend .est-key b { color: var(--trip); font-weight: 600; }
 
 table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }

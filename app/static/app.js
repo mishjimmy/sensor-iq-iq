@@ -29,10 +29,44 @@ function ago(ts) {
 
 // ---- filtering -------------------------------------------------------------
 function filters() {
-  try { localStorage.setItem("siq.filters", JSON.stringify({ q: $("#q").value, p: $("#panelFilter").value, t: $("#trippedOnly").checked, view })); } catch {}
-  return { q: $("#q").value.trim().toLowerCase(), panel: $("#panelFilter").value, tripped: $("#trippedOnly").checked };
+  try { localStorage.setItem("siq.filters", JSON.stringify({ q: $("#q").value, p: $("#panelFilter").value, t: $("#trippedOnly").checked, e: $("#compareEst").checked, view })); } catch {}
+  return { q: $("#q").value.trim().toLowerCase(), panel: $("#panelFilter").value, tripped: $("#trippedOnly").checked, est: $("#compareEst").checked };
 }
 function info(c) { return (c.circuit && state.circuit_info[c.circuit]) || null; }
+
+// ---- actual vs estimate ----------------------------------------------------
+// Estimate = SUM of Wattage for everything on the circuit in Grist's Fixture_Schedule (same as the
+// panel schedule page). It's a full-on / rated figure, so dimmed loads read under 100%.
+const OVER = 1.2;  // flag circuits drawing 20%+ more than the schedule says (driver/PSU losses ~10%)
+const kw = (w) => (w >= 10000 ? (w / 1000).toFixed(0) + "k" : w >= 1000 ? (w / 1000).toFixed(1) + "k" : String(Math.round(w)));
+function estOf(c) {
+  const i = info(c);
+  return i && i.est_w != null ? i.est_w : null;
+}
+const compareable = (c) => !c.pole_of && (c.status === "on" || c.status === "off");
+function estTotals(circuits) {
+  // only circuits that are on and have an estimate: an off circuit's estimate isn't "expected" draw
+  let actual = 0, est = 0, over = 0, unsched = 0;
+  for (const c of circuits) {
+    if (c.status !== "on" || c.pole_of) continue;
+    const e = estOf(c);
+    if (e == null || e <= 0) { if (c.power_w > 5) unsched++; continue; }
+    actual += c.power_w; est += e;
+    if (c.power_w > e * OVER) over++;
+  }
+  return { actual, est, over, unsched, pct: est ? Math.round((actual / est) * 100) : null };
+}
+function estTip(c) {
+  const i = info(c);
+  if (!i) return [];
+  const out = [];
+  if (i.est_w != null) {
+    out.push(`Estimate: ${Math.round(i.est_w)} W from ${i.est_loads} device${i.est_loads === 1 ? "" : "s"}` +
+      (i.est_unknown ? ` (${i.est_unknown} with no wattage)` : ""));
+    if (c.status === "on" && i.est_w > 0) out.push(`Actual: ${Math.round(c.power_w)} W = ${Math.round((c.power_w / i.est_w) * 100)}% of estimate`);
+  } else if (i.est_loads) out.push(`Estimate: none of the ${i.est_loads} device(s) on this circuit has a wattage`);
+  return out;
+}
 function matches(c, panel, f) {
   if (f.tripped && c.status !== "tripped") return false;
   if (!f.q) return true;
@@ -61,6 +95,12 @@ function renderStats() {
     ["On", c.on, "on"], ["Off", c.off, ""], ["Tripped", c.tripped, c.tripped ? "trip" : ""],
     ["Offline circuits", c.offline, c.offline ? "offline" : ""],
   ];
+  if ($("#compareEst").checked) {
+    const et = estTotals(state.panels.filter((p) => p.online).flatMap((p) => p.circuits));
+    tiles.push(["Actual vs estimate", et.pct == null ? "—" : et.pct + "%", ""],
+      ["Over estimate", et.over, et.over ? "trip" : ""]);
+    if (et.unsched) tiles.push(["On, no estimate", et.unsched, "offline"]);
+  }
   $("#stats").replaceChildren(...tiles.map(([l, v, cls]) =>
     el("div", { class: "stat " + cls }, el("div", { class: "label", text: l }), el("div", { class: "value", text: v }))));
   $("#updated").textContent = "Updated " + ago(state.updated_at);
@@ -120,15 +160,28 @@ function slotTile(c, p, f, side) {
     c.circuit ? `Circuit ${c.circuit}` : `Slot ${c.slot}`, `Slot ${c.slot} · ${c.status}`,
     c.status !== "empty" && c.status !== "offline" ? `${c.current_a.toFixed(2)} A · ${Math.round(c.power_w)} W · ${c.voltage} V` : null,
     rooms && `Rooms: ${rooms}`, i && i.anchors && i.anchors.length && `Anchor: ${i.anchors.join(", ")}`, i && i.load_types && `Loads: ${i.load_types}`, i && `Fixtures: ${i.fixture_count}`,
+    ...estTip(c),
     c.pole_of && `Pole 2 of slot ${c.pole_of}`, c.breaker_type && c.breaker_type !== "None" && c.breaker_type,
     ...(c.errors || []),
   ].filter(Boolean).join("\n");
-  const amps = c.status === "tripped" ? "TRIP" : c.status === "empty" ? "—" : c.status === "offline" ? "?"
+  let amps = c.status === "tripped" ? "TRIP" : c.status === "empty" ? "—" : c.status === "offline" ? "?"
     : c.pole_of ? "⇡" : fmtA(c.current_a);
+  let cls = "", style = null;
+  if (f.est && compareable(c)) {
+    // actual / estimate in watts, with a bar showing the ratio (full + red when over)
+    const e = estOf(c), on = c.status === "on";
+    amps = `${on ? kw(c.power_w) : "–"}/${e != null ? kw(e) : "?"} W`;
+    cls = " cmp";
+    if (on && e > 0) {
+      const r = c.power_w / e;
+      style = `--pct:${Math.min(100, Math.round(r * 100))}`;
+      if (r > OVER) cls += " over";
+    } else if (on && c.power_w > 5) cls += " unsched";  // drawing power with nothing scheduled
+  }
   // like a printed panel schedule: circuit numbers sit next to the centre bus, descriptions on the outside
   const parts = [el("span", { class: "room", text: rooms }), el("span", { class: "amps", text: amps }),
     el("span", { class: "id", text: c.circuit || "S" + c.slot })];
-  return el("div", { class: `slot ${side} ${c.status}${matches(c, p.panel, f) ? "" : " dim"}`, title: tip },
+  return el("div", { class: `slot ${side} ${c.status}${cls}${matches(c, p.panel, f) ? "" : " dim"}`, title: tip, style },
     side === "left" ? parts : parts.reverse());
 }
 
@@ -165,12 +218,15 @@ function renderPanels(f) {
     const meta = [pn.room, pn.ip, pn.grist_panel != null ? `Grist panel ${pn.grist_panel}` : "no Grist panel",
       inf.incoming_voltage ? `${inf.incoming_voltage} V in` : null, inf.firmware ? `fw ${inf.firmware}` : null].filter(Boolean).join(" · ");
     const errs = (inf.errors || []);
+    const et = f.est && p.online ? estTotals(p.circuits) : null;
     return el("article", { class: "card" + (pn.enabled && p.polled && !p.online ? " offline" : "") },
       el("div", { class: "card-head" },
         el("h2", {}, el("span", { class: "dot " + status[0], title: status[1] }), pn.name),
         el("span", { class: "meta", text: meta }),
         el("span", { class: "totals" }, fmtA(s.total_a), " · ", fmtW(s.total_w),
-          s.counts.tripped ? el("span", { class: "trip", text: `${s.counts.tripped} tripped` }) : null)),
+          s.counts.tripped ? el("span", { class: "trip", text: `${s.counts.tripped} tripped` }) : null,
+          et && et.est ? el("span", { class: "est" + (et.over ? " over" : ""), title: "Circuits that are on and have a fixture-schedule estimate",
+            text: `on: ${fmtW(et.actual)} of ${fmtW(et.est)} est (${et.pct}%)${et.over ? ` · ${et.over} over` : ""}` }) : null)),
       errs.length && p.online ? el("details", { class: "card-errors" }, el("summary", { text: `${errs.length} panel alert(s)` }),
         el("div", { text: errs.join(" · ") })) : null,
       panelSchedule(p, f));
@@ -295,6 +351,7 @@ function render() {
   renderStats();
   $("#view-panels").hidden = view !== "panels";
   $("#view-rooms").hidden = view !== "rooms";
+  $("#estKey").hidden = !(f.est && view === "panels");
   if (view === "panels") renderPanels(f); else renderRooms(f);
 }
 
@@ -312,6 +369,7 @@ try {
   const saved = JSON.parse(localStorage.getItem("siq.filters") || "{}");
   if (saved.q) $("#q").value = saved.q;
   if (saved.t) $("#trippedOnly").checked = true;
+  if (saved.e) $("#compareEst").checked = true;
   if (saved.view) view = saved.view;
   if (saved.p) $("#panelFilter").append(el("option", { value: saved.p, text: saved.p })), $("#panelFilter").value = saved.p;
 } catch {}
@@ -327,7 +385,8 @@ document.querySelectorAll(".tabs button").forEach((b) => {
     render();
   });
 });
-["#q", "#panelFilter", "#trippedOnly"].forEach((s) => $(s).addEventListener("input", render));
+if (params.get("est") === "1") $("#compareEst").checked = true;
+["#q", "#panelFilter", "#trippedOnly", "#compareEst"].forEach((s) => $(s).addEventListener("input", render));
 setInterval(() => state && ($("#updated").textContent = "Updated " + ago(state.updated_at)), 1000);
 wireRoomsControls();
 connect();

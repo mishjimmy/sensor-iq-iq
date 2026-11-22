@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from app.grist import GristClient, circuit_fields, split_rooms
+from app.grist import EST_SQL, GristClient, circuit_fields, parse_estimate, split_rooms
 from app.model import Circuit
 
 
@@ -77,3 +77,23 @@ async def test_raw_json_sent_but_load_jitter_ignored():
         jitter[2]["patch"]["dmxAddr"] = 400
         assert await g.push_circuits(rows(jitter)) == 1
     assert "raw" not in normalise_outputs(outputs, 12)[0].to_dict()      # kept out of the dashboard SSE
+
+
+def test_parse_estimate():
+    assert parse_estimate({"ckt": " 1202 ", "est_w": 2383.44, "n_loads": 53, "n_unknown": 2}) == (
+        "1202", {"est_w": 2383.4, "est_loads": 53, "est_unknown": 2})
+    # nothing on the circuit has a wattage: no estimate
+    assert parse_estimate({"ckt": "1216", "est_w": 0, "n_loads": 1, "n_unknown": 1})[1]["est_w"] is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_estimates():
+    def handler(req: httpx.Request):
+        assert req.url.params["q"] == EST_SQL
+        return httpx.Response(200, json={"records": [
+            {"fields": {"ckt": "1201", "est_w": 680, "n_loads": 8, "n_unknown": 4}},
+            {"fields": {"ckt": "", "est_w": 5, "n_loads": 1, "n_unknown": 0}}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+        est = await GristClient("https://g.example", "D", "k", c).fetch_estimates()
+    assert est == {"1201": {"est_w": 680.0, "est_loads": 8, "est_unknown": 4}}

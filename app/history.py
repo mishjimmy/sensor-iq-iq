@@ -1,4 +1,4 @@
-"""Usage history in SQLite: 1-minute panel totals, 5-minute circuit stats, status-change events.
+"""Usage history in SQLite: 1-minute panel totals, 15-minute circuit stats, status-change events.
 
 Samples are accumulated in memory each poll and flushed when their time bucket closes,
 so the database sees one row per panel per minute and one per active circuit per 15 min.
@@ -224,12 +224,15 @@ class History:
                 if not cov_n:
                     continue
                 spp = cov_s / cov_n  # seconds represented by one poll sample
+                w_per_a = sw / sa if sa else 0  # volts x power factor, to turn peak amps into watts
                 circuits.append({
                     "ip": ip, "slot": slot, "circuit": circuit,
                     "avg_a": round(sa / cov_n, 3),        # averaged over all the time the panel was online
                     "max_a": round(max_a, 2),
                     "kwh": round(sw * spp / 3.6e6, 3),
                     "on_hours": round(son * spp / 3600, 2),
+                    "on_w": round(sw / son, 1) if son else None,  # average draw while switched on
+                    "peak_w": round(max_a * w_per_a, 1),           # peak current at the average W/A
                 })
 
             events = [dict(zip(("ts", "ip", "panel_name", "slot", "circuit", "old", "new"), r)) for r in db.execute(

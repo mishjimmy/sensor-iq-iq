@@ -139,6 +139,16 @@ Status shows `no data` until a panel with that `grist_panel` is configured and s
 
 `Circuit_Live_A` is the whole circuit's current, shared by every fixture on that circuit.
 
+### Estimated load per circuit (read-only)
+
+Each time the circuit map refreshes, the service also reads an estimate for each circuit from Grist. The estimate (`est_w`) is the full sum of `Fixture_Schedule.Wattage` over every device on the circuit (`Device_Power_Circuit`), PSUs and drivers included. It matches the panel schedule page's `SUM($group.Wattage)`. Devices with blank or zero wattage are counted as `est_unknown`.
+
+The estimate counts rated wattage at full output, so dimmed loads read below 100%. Because PSUs and the fixtures they feed are both included, PSU-fed circuits will usually read well below their estimate. Circuits drawing 20% or more above their estimate are flagged, which allows for driver and PSU losses.
+
+Where it shows:
+- **Dashboard:** turn on **Actual vs estimate** (or open `/?est=1`). Each circuit shows actual W / estimated W with a ratio bar. The panel cards and header show totals for circuits that are on.
+- **Stats page:** the **Actual vs estimated load** card plots each circuit's peak (or average-while-on) draw against its estimate, with a table view. A KPI tile counts circuits over their estimate.
+
 ## Usage history
 
 Every poll feeds an in-memory accumulator. When a time bucket closes, it is written to SQLite:

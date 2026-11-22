@@ -42,6 +42,8 @@ def test_record_and_query(tmp_path):
     assert 2 not in by_slot and 4 not in by_slot          # never drew current / empty -> not stored
     assert by_slot[1]["max_a"] == 10 and abs(by_slot[1]["avg_a"] - 10) < 0.01
     assert abs(by_slot[3]["on_hours"] - 1.0) < 0.01
+    assert by_slot[1]["peak_w"] == 1200 and by_slot[1]["on_w"] == 1200
+    assert abs(by_slot[3]["on_w"] - 240) < 0.5             # averaged only over time it was on
 
     kinds = {(e["slot"], e["old"], e["new"]) for e in q["events"]}
     assert (3, "on", "tripped") in kinds

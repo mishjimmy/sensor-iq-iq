@@ -18,11 +18,32 @@ PANEL_TABLE = "Panel_Live"
 MAP_SQL = ("SELECT Circuit, Panel, Circuit_No, Rooms, Anchor, Load_Types, Fixture_Count "
            "FROM Panel_Schedule_Export")
 ANCHOR_SQL = "SELECT ANCHOR_CODE, ANCHOR_NAME FROM Anchors"
+# Estimated load per circuit: the full SUM of Fixture_Schedule.Wattage for every device on the
+# circuit (PSUs / drivers included), matching the panel schedule page's SUM($group.Wattage).
+# Non-numeric Wattage (blank / formula error) is skipped and counted as unknown.
+_NUM = "typeof(Wattage) IN ('real','integer')"
+EST_SQL = (
+    "SELECT TRIM(Device_Power_Circuit) AS ckt, "
+    f"SUM(CASE WHEN {_NUM} THEN Wattage ELSE 0 END) AS est_w, "
+    "COUNT(*) AS n_loads, "
+    f"SUM(CASE WHEN NOT {_NUM} OR Wattage = 0 THEN 1 ELSE 0 END) AS n_unknown "
+    "FROM Fixture_Schedule WHERE TRIM(COALESCE(Device_Power_Circuit, '')) != '' "
+    "GROUP BY TRIM(Device_Power_Circuit)"
+)
 BATCH = 500
 
 
 def split_rooms(value: Any) -> list[str]:
     return [r.strip() for r in str(value or "").split(",") if r.strip()]
+
+
+def parse_estimate(f: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    est = round(float(f.get("est_w") or 0), 1)
+    return str(f.get("ckt") or "").strip(), {
+        "est_w": est or None,  # None when nothing on the circuit has a wattage
+        "est_loads": int(f.get("n_loads") or 0),
+        "est_unknown": int(f.get("n_unknown") or 0),
+    }
 
 
 def circuit_fields(c: Circuit, panel_no: int, panel_name: str) -> dict[str, Any]:
@@ -98,6 +119,12 @@ class GristClient:
             if code:
                 out[code] = str(rec["fields"].get("ANCHOR_NAME") or "").strip()
         return out
+
+    async def fetch_estimates(self) -> dict[str, dict[str, Any]]:
+        """Circuit -> estimated load from Fixture_Schedule (see EST_SQL)."""
+        r = await self.client.get(f"{self.base}/sql", params={"q": EST_SQL}, headers=self.headers, timeout=30)
+        r.raise_for_status()
+        return {k: v for rec in r.json().get("records", []) for k, v in [parse_estimate(rec["fields"])] if k}
 
     def changed_circuits(self, rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return {k: v for k, v in rows.items() if self._sent.get(k) != change_signature(v)}

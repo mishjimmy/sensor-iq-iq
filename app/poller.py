@@ -206,7 +206,15 @@ class Monitor:
 
     # ---- Grist ---------------------------------------------------------
     async def refresh_grist_map(self) -> None:
-        self.grist_map = await self.grist.fetch_map()
+        gmap = await self.grist.fetch_map()
+        try:
+            est = await self.grist.fetch_estimates()
+            for k, v in est.items():
+                if k in gmap:
+                    gmap[k].update(v)
+        except Exception as e:  # estimates are an extra; keep the circuit map even if this fails
+            log.warning("grist load estimates failed: %s", e)
+        self.grist_map = gmap
         try:
             self.anchor_names = await self.grist.fetch_anchor_names()
         except Exception as e:  # names are cosmetic; keep the circuit map even if this fails

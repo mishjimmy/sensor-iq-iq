@@ -46,6 +46,19 @@
         <div class="chart" id="energy"></div>
       </article>
 
+      <article class="chart-card wide">
+        <div class="chart-head">
+          <div><h2>Actual vs estimated load</h2><div class="sub" id="est-sub">Per circuit: fixture-schedule estimate (Grist) against measured draw</div></div>
+          <div class="seg" role="group" aria-label="Compare">
+            <button data-est="peak_w" aria-pressed="true">Peak W</button>
+            <button data-est="on_w" aria-pressed="false">Avg while on</button>
+            <button data-est="table" aria-pressed="false">Table</button>
+          </div>
+        </div>
+        <div class="legend-row" id="est-legend"></div>
+        <div class="chart" id="est"></div>
+      </article>
+
       <article class="chart-card">
         <div class="chart-head">
           <div><h2>Top circuits</h2><div class="sub" id="top-sub">Highest average current</div></div>

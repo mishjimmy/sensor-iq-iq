@@ -7,6 +7,8 @@ let data = null;
 let range = "24h";
 let metric = "avg_a";
 let energyView = "chart";
+let estView = "peak_w";
+const OVER = 1.2;  // same threshold as the dashboard: 20%+ over the schedule estimate
 
 // ---- helpers ---------------------------------------------------------------
 function el(tag, attrs = {}, ...kids) {
@@ -82,7 +84,12 @@ function renderKpis() {
     ["Peak power", fmtKW(k.peak_w), k.peak_ts ? "at " + tFull(k.peak_ts) : ""],
     ["Breaker trips", String(k.trips), "new trips in range"],
   ];
-  $("#kpis").replaceChildren(...tiles.map(([l, v, sub, hero]) => el("div", { class: "stat" + (l === "Breaker trips" && k.trips ? " trip" : "") },
+  const ec = estCircuits();
+  if (ec.withEst.length) {
+    const over = ec.withEst.filter((c) => c.peak_w > c.est * OVER).length;
+    tiles.push(["Over estimate", String(over), `of ${ec.withEst.length} circuits, peak 20%+ above schedule`]);
+  }
+  $("#kpis").replaceChildren(...tiles.map(([l, v, sub, hero]) => el("div", { class: "stat" + ((l === "Breaker trips" || l === "Over estimate") && v !== "0" ? " trip" : "") },
     el("div", { class: "label", text: l }), el("div", { class: "value" + (hero ? " hero" : ""), text: v }), el("div", { class: "sub", text: sub }))));
   $("#coverage").textContent = data.collecting_since ? `History since ${tFull(data.collecting_since)}` : "No history recorded yet";
 }
@@ -319,6 +326,96 @@ function renderRooms() {
   });
 }
 
+// ---- actual vs estimate ----------------------------------------------------
+function estCircuits() {
+  const withEst = [], noEst = [];
+  for (const c of data.circuits) {
+    const i = c.circuit && data.circuit_info[c.circuit];
+    if (i && i.est_w > 0) withEst.push({ ...c, est: i.est_w, info: i, pct: c.peak_w / i.est_w });
+    else if (c.peak_w > 5) noEst.push({ ...c, est: null, info: i || null, pct: null });
+  }
+  return { withEst, noEst };
+}
+
+function renderEst() {
+  const box = $("#est"), legend = $("#est-legend");
+  if (!Object.values(data.circuit_info).some((i) => i.est_w != null)) {
+    legend.replaceChildren();
+    return empty(box, "Estimates come from fixture wattage in the Grist fixture schedule. Set GRIST_API_KEY / GRIST_SERVER and each panel's Grist panel number.");
+  }
+  const { withEst, noEst } = estCircuits();
+  const over = withEst.filter((c) => c.peak_w > c.est * OVER);
+  $("#est-sub").textContent = `${withEst.length} circuits with an estimate · ${over.length} peaked 20%+ over` +
+    (noEst.length ? ` · ${noEst.length} drew power with no estimate` : "");
+  const pctTxt = (v) => (v == null ? "—" : Math.round(v * 100) + "%");
+  const tipFor = (c) => [el("div", { class: "t", text: `${circuitLabel(c)} · ${panelName(c.ip)} slot ${c.slot}` }),
+    c.info && c.info.rooms.length ? tipRow("Rooms", c.info.rooms.join(", ")) : null,
+    tipRow("Estimate", c.est == null ? "—" : Math.round(c.est) + " W"),
+    tipRow("Peak", Math.round(c.peak_w) + " W"), tipRow("Avg while on", c.on_w == null ? "—" : Math.round(c.on_w) + " W"),
+    tipRow("Peak vs estimate", pctTxt(c.pct)),
+    c.info && c.info.est_unknown ? tipRow("Devices with no wattage", String(c.info.est_unknown)) : null];
+
+  if (estView === "table") {
+    legend.replaceChildren();
+    const rows = [...withEst].sort((a, b) => b.pct - a.pct).concat([...noEst].sort((a, b) => b.peak_w - a.peak_w));
+    const w = (v) => (v == null ? "—" : Math.round(v).toLocaleString());
+    const table = el("table", { class: "compact" },
+      el("thead", {}, el("tr", {}, ["Circuit", "Panel", "Rooms"].map((h) => el("th", { text: h })),
+        ["Est W", "Avg on W", "Peak W", "Peak ÷ est"].map((h) => el("th", { class: "num", text: h })))),
+      el("tbody", {}, rows.map((c) => el("tr", {}, el("td", { text: circuitLabel(c) }), el("td", { text: panelName(c.ip) }),
+        el("td", { text: c.info ? c.info.rooms.join(", ") : "" }), el("td", { class: "num", text: w(c.est) }),
+        el("td", { class: "num", text: w(c.on_w) }), el("td", { class: "num", text: w(c.peak_w) }),
+        el("td", { class: "num" + (c.pct > OVER ? " trip-num" : c.pct == null ? " muted" : ""), text: c.pct == null ? "no estimate" : pctTxt(c.pct) })))));
+    return box.replaceChildren(el("div", { class: "data-table" }, table));
+  }
+
+  // scatter: estimate (x) against measured (y); points above the diagonal drew more than scheduled
+  const pts = withEst.filter((c) => c[estView] != null);
+  legend.replaceChildren(
+    el("span", { class: "key" }, el("i", { class: "sw", style: "background:var(--s1)" }), "Within estimate"),
+    el("span", { class: "key" }, el("i", { class: "sw", style: "background:var(--trip)" }), "20%+ over"),
+    el("span", { class: "key" }, el("i", { class: "sw", style: "background:var(--axis);height:2px" }), "Actual = estimate"));
+  if (!pts.length) return empty(box, "No circuit history in this range yet.");
+  const W = box.clientWidth, H = 300, m = { t: 10, r: 14, b: 34, l: 52 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const { max, ticks } = niceTicks(Math.max(...pts.map((c) => Math.max(c.est, c[estView]))));
+  const X = (v) => m.l + (v / max) * iw, Y = (v) => m.t + ih - (v / max) * ih;
+  const label = estView === "peak_w" ? "Peak" : "Avg while on";
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${label} watts against estimated watts per circuit` });
+  for (const v of ticks) {
+    svg.append(s("line", { class: v ? "gridline" : "baseline", x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }));
+    svg.append(s("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, fmtNum(v)));
+    if (v) svg.append(s("text", { x: X(v), y: m.t + ih + 16, "text-anchor": "middle" }, fmtNum(v)));
+  }
+  svg.append(s("text", { x: m.l + iw, y: H - 2, "text-anchor": "end" }, "Estimated W →"));
+  svg.append(s("text", { x: m.l + 4, y: m.t + 10 }, label + " W ↑"));
+  svg.append(s("line", { x1: X(0), y1: Y(0), x2: X(max), y2: Y(max), stroke: "var(--axis)", "stroke-width": 1.5, "stroke-dasharray": "4 4" }));
+  const isOver = (c) => c[estView] > c.est * OVER;
+  // draw over-estimate points last so they sit on top
+  for (const c of [...pts].sort((a, b) => isOver(a) - isOver(b))) {
+    svg.append(s("circle", { cx: X(c.est), cy: Y(c[estView]), r: 4.5, fill: isOver(c) ? "var(--trip)" : "var(--s1)",
+      "fill-opacity": 0.75, stroke: "var(--surface)", "stroke-width": 1 }));
+  }
+  const ring = s("circle", { r: 7, fill: "none", stroke: "var(--text)", "stroke-width": 1.5, visibility: "hidden" });
+  const hit = s("rect", { class: "hit", x: m.l, y: m.t, width: iw, height: ih });
+  svg.append(ring, hit);
+  box.replaceChildren(svg, box.querySelector(".tooltip") || "");
+  const tip = tooltip(box);
+  hit.addEventListener("pointermove", (ev) => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (W / r.width), py = (ev.clientY - r.top) * (H / r.height);
+    let best = null, bd = 18 * 18;
+    for (const c of pts) {
+      const d = (X(c.est) - px) ** 2 + (Y(c[estView]) - py) ** 2;
+      if (d < bd) { bd = d; best = c; }
+    }
+    if (!best) { tip.hide(); ring.setAttribute("visibility", "hidden"); return; }
+    const cx = X(best.est), cy = Y(best[estView]);
+    ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("visibility", "visible");
+    tip.show(cx * (r.width / W), cy * (r.height / H), tipFor(best));
+  });
+  hit.addEventListener("pointerleave", () => { tip.hide(); ring.setAttribute("visibility", "hidden"); });
+}
+
 // ---- heatmap ---------------------------------------------------------------
 function renderHeat() {
   const box = $("#heat");
@@ -420,7 +517,7 @@ function timeTicks(x0, x1, maxTicks) {
 // ---- load / wiring ---------------------------------------------------------
 function renderAll() {
   if (!data) return;
-  renderKpis(); renderPower(); renderEnergy(); renderTop(); renderRooms(); renderHeat(); renderEvents();
+  renderKpis(); renderPower(); renderEnergy(); renderTop(); renderEst(); renderRooms(); renderHeat(); renderEvents();
   $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
 }
 
@@ -448,6 +545,7 @@ document.querySelectorAll(".range button").forEach((b) => b.addEventListener("cl
   load();
 }));
 document.querySelectorAll("[data-metric]").forEach((b) => b.addEventListener("click", () => { metric = b.dataset.metric; press("[data-metric]", "metric", metric); renderTop(); }));
+document.querySelectorAll("[data-est]").forEach((b) => b.addEventListener("click", () => { estView = b.dataset.est; press("[data-est]", "est", estView); renderEst(); }));
 document.querySelectorAll("[data-energy]").forEach((b) => b.addEventListener("click", () => { energyView = b.dataset.energy; press("[data-energy]", "energy", energyView); renderEnergy(); }));
 let resizeT;
 new ResizeObserver(() => { clearTimeout(resizeT); resizeT = setTimeout(renderAll, 150); }).observe(document.querySelector("main"));
