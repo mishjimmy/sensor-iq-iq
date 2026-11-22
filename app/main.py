@@ -60,6 +60,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SensorIQ Monitor", lifespan=lifespan)
 app.include_router(router)
+
+
+@app.middleware("http")
+async def no_stale_assets(request, call_next):
+    """Pages and /static must revalidate every load, so a redeploy shows up immediately.
+
+    Without this, Cloudflare (and browsers) cache app.js/styles.css and serve the old UI.
+    ETag/Last-Modified still make unchanged files a cheap 304.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") or path in ("/", "/panels", "/stats"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
