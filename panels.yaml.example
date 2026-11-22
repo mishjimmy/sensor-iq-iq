@@ -1,0 +1,14 @@
+# SensorIQ panels to monitor. Edit by hand or from the /panels page.
+#   name:         display name
+#   ip:           panel IP address (read-only HTTP GETs only)
+#   room:         where the panel physically is
+#   grist_panel:  EIS panel number in Grist (Panel_Schedule_Export.Panel), e.g. 12 -> circuits "1201".."1248"
+#   slot_offset:  circuit number = slot + slot_offset (normally 0)
+#   enabled:      false to stop polling without deleting
+panels:
+  - name: EER01 Panel 12
+    ip: 10.64.41.205
+    room: EER01
+    grist_panel: 12
+    slot_offset: 0
+    enabled: true

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SensorIQ Monitor</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>SensorIQ Monitor</h1>
+    <span class="pill" id="conn"><span class="dot"></span>connecting…</span>
+    <span class="pill" id="grist" hidden></span>
+    <nav>
+      <span id="updated" class="muted"></span>
+      <a href="/stats">Usage stats</a>
+      <a href="/panels">Manage panels</a>
+    </nav>
+  </header>
+  <main>
+    <div id="banners"></div>
+    <section class="stats" id="stats"></section>
+    <div class="toolbar">
+      <div class="tabs" role="tablist">
+        <button data-view="panels" class="active">Panels</button>
+        <button data-view="rooms">Rooms</button>
+      </div>
+      <input type="search" id="q" placeholder="Filter circuit, room, load…" aria-label="Filter">
+      <select id="panelFilter" aria-label="Panel"><option value="">All panels</option></select>
+      <label class="check"><input type="checkbox" id="trippedOnly"> Tripped only</label>
+      <div class="legend">
+        <span class="on">On</span><span class="off">Off</span><span class="tripped">Tripped</span>
+        <span class="offline">Offline</span><span class="empty">Empty</span>
+      </div>
+    </div>
+    <section id="view-panels" class="panels"></section>
+    <section id="view-rooms" hidden></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

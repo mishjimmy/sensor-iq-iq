@@ -1,0 +1,16 @@
+.venv/
+.git/
+.gitignore
+.pytest_cache/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+panels.yaml
+*.db
+*.db-wal
+*.db-shm
+tests/
+Dockerfile
+.dockerignore

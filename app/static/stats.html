@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usage Stats</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Usage stats</h1>
+    <nav>
+      <span id="updated" class="muted"></span>
+      <a href="/">Dashboard</a>
+      <a href="/panels">Manage panels</a>
+    </nav>
+  </header>
+  <main>
+    <div id="banners"></div>
+    <div class="toolbar">
+      <div class="range" role="group" aria-label="Time range">
+        <button data-range="6h">6 hours</button>
+        <button data-range="24h">24 hours</button>
+        <button data-range="7d">7 days</button>
+        <button data-range="30d">30 days</button>
+      </div>
+      <span class="muted" id="coverage"></span>
+    </div>
+
+    <section class="stats" id="kpis"></section>
+
+    <section class="charts">
+      <article class="chart-card wide">
+        <div class="chart-head">
+          <div><h2>Site power</h2><div class="sub" id="power-sub">Total across all panels</div></div>
+        </div>
+        <div class="chart" id="power"></div>
+      </article>
+
+      <article class="chart-card wide">
+        <div class="chart-head">
+          <div><h2 id="energy-title">Energy by panel</h2><div class="sub">kWh per period, stacked by panel</div></div>
+          <div class="seg" role="group" aria-label="View"><button data-energy="chart" aria-pressed="true">Chart</button><button data-energy="table" aria-pressed="false">Table</button></div>
+        </div>
+        <div class="legend-row" id="energy-legend"></div>
+        <div class="chart" id="energy"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="chart-head">
+          <div><h2>Top circuits</h2><div class="sub" id="top-sub">Highest average current</div></div>
+          <div class="seg" role="group" aria-label="Rank by">
+            <button data-metric="avg_a" aria-pressed="true">Avg A</button>
+            <button data-metric="max_a" aria-pressed="false">Peak A</button>
+            <button data-metric="kwh" aria-pressed="false">kWh</button>
+            <button data-metric="on_hours" aria-pressed="false">Hours on</button>
+          </div>
+        </div>
+        <div class="chart" id="top"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="chart-head">
+          <div><h2>Energy by room</h2><div class="sub">kWh per served room (Grist schedule); shared circuits split evenly</div></div>
+        </div>
+        <div class="chart" id="rooms"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="chart-head">
+          <div><h2>Usage by hour</h2><div class="sub">Average site power for each hour of each day</div></div>
+        </div>
+        <div class="chart" id="heat"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="chart-head">
+          <div><h2>Trips &amp; outages</h2><div class="sub" id="events-sub">Breaker trips and panel connectivity changes</div></div>
+        </div>
+        <div id="events"></div>
+      </article>
+    </section>
+  </main>
+  <script src="/static/stats.js"></script>
+</body>
+</html>

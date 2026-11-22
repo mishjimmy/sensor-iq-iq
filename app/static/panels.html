@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manage Panels</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Manage panels</h1>
+    <nav><a href="/">← Dashboard</a><a href="/stats">Usage stats</a></nav>
+  </header>
+  <main>
+    <div id="banners"></div>
+    <p class="muted">Panels are stored in <code>panels.yaml</code> on the server. You can add them here or edit that file directly; changes are picked up within a few seconds.
+      The monitor only ever reads from panels (HTTP GET of <code>/api/info</code> and <code>/api/outputs</code>).</p>
+
+    <form class="panel-form" id="form" autocomplete="off">
+      <label>Name <input type="text" name="name" required placeholder="EER01 Panel 12"></label>
+      <label>IP address <input type="text" name="ip" required placeholder="10.64.41.205" inputmode="decimal"></label>
+      <label>Room / location <input type="text" name="room" placeholder="EER01"></label>
+      <label>Grist panel number <input type="number" name="grist_panel" min="1" max="99" list="gristPanels" placeholder="12">
+        <datalist id="gristPanels"></datalist></label>
+      <label>Slot offset <input type="number" name="slot_offset" value="0"></label>
+      <label class="check" style="flex-direction:row"><input type="checkbox" name="enabled" checked> Enabled</label>
+      <div class="form-actions">
+        <label style="flex-direction:row;align-items:center;gap:6px">Admin token
+          <input type="password" id="token" placeholder="ADMIN_TOKEN" autocomplete="current-password"></label>
+        <button type="button" class="btn" id="testBtn">Test connection</button>
+        <button type="submit" class="btn primary" id="saveBtn">Add panel</button>
+        <button type="button" class="btn" id="cancelBtn" hidden>Cancel edit</button>
+        <span class="msg" id="msg"></span>
+      </div>
+    </form>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>IP</th><th>Room</th><th class="num">Grist panel</th><th class="num">Offset</th><th>Enabled</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:14px">Grist panel number = the EIS panel (e.g. <b>12</b> → circuits <code>1201</code>–<code>1248</code> in
+      <code>Panel_Schedule_Export</code> and <code>Fixture_Schedule.Device_Power_Circuit</code>). Circuit number = slot + slot offset.</p>
+  </main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const form = $("#form");
+let editing = null, data = null;
+
+try { $("#token").value = sessionStorage.getItem("siq.token") || ""; } catch {}
+$("#token").addEventListener("input", () => { try { sessionStorage.setItem("siq.token", $("#token").value); } catch {} });
+
+function msg(text, ok) { const m = $("#msg"); m.textContent = text; m.className = "msg " + (ok ? "ok" : "err"); }
+function body() {
+  const fd = new FormData(form);
+  return { name: fd.get("name"), ip: fd.get("ip"), room: fd.get("room"),
+           grist_panel: fd.get("grist_panel") || null, slot_offset: Number(fd.get("slot_offset") || 0),
+           enabled: form.enabled.checked };
+}
+async function api(method, url, payload) {
+  const r = await fetch(url, { method, headers: { "Content-Type": "application/json", "X-Admin-Token": $("#token").value },
+                               body: payload ? JSON.stringify(payload) : undefined });
+  if (!r.ok) { let d; try { d = (await r.json()).detail; } catch { d = r.statusText; } throw new Error(d); }
+  return r.status === 204 ? null : r.json();
+}
+
+function td(text, cls) { const c = document.createElement("td"); c.textContent = text ?? ""; if (cls) c.className = cls; return c; }
+function btn(text, cls, fn) { const b = document.createElement("button"); b.type = "button"; b.className = "btn " + cls; b.textContent = text; b.onclick = fn; return b; }
+
+async function load() {
+  data = await (await fetch("/api/panels")).json();
+  const ban = [];
+  if (!data.admin_enabled) ban.push(["warn", "Editing from this page is disabled because ADMIN_TOKEN is not set on the server. Edit panels.yaml instead."]);
+  if (data.registry_error) ban.push(["err", "panels.yaml error: " + data.registry_error]);
+  $("#banners").replaceChildren(...ban.map(([c, t]) => { const d = document.createElement("div"); d.className = "banner " + c; d.textContent = t; return d; }));
+  for (const b of ["#testBtn", "#saveBtn"]) $(b).disabled = !data.admin_enabled;
+  $("#gristPanels").replaceChildren(...data.grist_panels.map((p) => { const o = document.createElement("option"); o.value = p; return o; }));
+  $("#rows").replaceChildren(...(data.panels.length ? data.panels.map((p) => {
+    const tr = document.createElement("tr");
+    const actions = document.createElement("td");
+    actions.style.whiteSpace = "nowrap";
+    if (data.admin_enabled) actions.append(
+      btn("Edit", "", () => startEdit(p)), " ",
+      btn(p.enabled ? "Disable" : "Enable", "", () => save(p.ip, { enabled: !p.enabled })), " ",
+      btn("Remove", "danger", async () => {
+        if (!confirm(`Remove ${p.name} (${p.ip}) from monitoring?`)) return;
+        try { await api("DELETE", "/api/panels/" + encodeURIComponent(p.ip)); msg("Removed " + p.name, true); load(); } catch (e) { msg(e.message); }
+      }));
+    const unknown = p.grist_panel != null && data.grist_panels.length && !data.grist_panels.includes(p.grist_panel);
+    tr.append(td(p.name), td(p.ip), td(p.room), td((p.grist_panel ?? "—") + (unknown ? " ⚠ not in Grist" : ""), "num"),
+              td(p.slot_offset, "num"), td(p.enabled ? "yes" : "no"), actions);
+    return tr;
+  }) : [(() => { const tr = document.createElement("tr"); const c = td("No panels yet."); c.colSpan = 7; c.className = "muted"; tr.append(c); return tr; })()]));
+}
+
+function startEdit(p) {
+  editing = p.ip;
+  for (const k of ["name", "ip", "room", "grist_panel", "slot_offset"]) form[k].value = p[k] ?? "";
+  form.enabled.checked = p.enabled;
+  $("#saveBtn").textContent = "Save changes"; $("#cancelBtn").hidden = false; msg("");
+  form.scrollIntoView({ behavior: "smooth" });
+}
+function resetForm() {
+  editing = null; form.reset(); form.slot_offset.value = 0; form.enabled.checked = true;
+  $("#saveBtn").textContent = "Add panel"; $("#cancelBtn").hidden = true;
+}
+async function save(ip, payload) {
+  try { await api("PUT", "/api/panels/" + encodeURIComponent(ip), payload); msg("Saved", true); await load(); }
+  catch (e) { msg(e.message); }
+}
+
+$("#cancelBtn").onclick = () => { resetForm(); msg(""); };
+$("#testBtn").onclick = async () => {
+  const ip = form.ip.value.trim();
+  if (!ip) return msg("Enter an IP first");
+  msg("Reading " + ip + "…", true);
+  try {
+    const i = await api("POST", "/api/panels/test", { ip });
+    msg(`OK: ${i.model} "${i.device_name}", ${i.slot_count} slots, fw ${i.firmware}, ${i.incoming_voltage} V, ${i.errors.length} alert(s)`, true);
+  } catch (e) { msg(e.message); }
+};
+form.onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    if (editing) await api("PUT", "/api/panels/" + encodeURIComponent(editing), body());
+    else await api("POST", "/api/panels", body());
+    msg(editing ? "Saved" : "Added " + form.name.value, true);
+    resetForm(); await load();
+  } catch (e) { msg(e.message); }
+};
+load().catch((e) => msg("Could not load panels: " + e.message));
+</script>
+</body>
+</html>
