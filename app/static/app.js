@@ -37,6 +37,7 @@ function info(c) { return (c.circuit && state.circuit_info[c.circuit]) || null; 
 // ---- actual vs estimate ----------------------------------------------------
 // Estimate = SUM of Wattage for everything on the circuit in Grist's Fixture_Schedule (same as the
 // panel schedule page). It's a full-on / rated figure, so dimmed loads read under 100%.
+const CIRCUIT_W = 2400, CONTINUOUS_W = 1800;  // per-circuit allocation and 80% continuous-load line
 const OVER = 1.2;  // flag circuits drawing 20%+ more than the schedule says (driver/PSU losses ~10%)
 const kw = (w) => (w >= 10000 ? (w / 1000).toFixed(0) + "k" : w >= 1000 ? (w / 1000).toFixed(1) + "k" : String(Math.round(w)));
 function estOf(c) {
@@ -171,12 +172,16 @@ function slotTile(c, p, f, side) {
     // actual / estimate in watts, with a bar showing the ratio (full + red when over)
     const e = estOf(c), on = c.status === "on";
     amps = `${on ? kw(c.power_w) : "–"}/${e != null ? kw(e) : "?"} W`;
-    cls = " cmp";
+    cls = " cmp bar";
     if (on && e > 0) {
       const r = c.power_w / e;
       style = `--pct:${Math.min(100, Math.round(r * 100))}`;
       if (r > OVER) cls += " over";
     } else if (on && c.power_w > 5) cls += " unsched";  // drawing power with nothing scheduled
+  } else if (compareable(c) && c.power_w > 0) {
+    // circuit capacity: share of the 2400 W allocation (20 A x 120 V); amber past the 1800 W continuous limit
+    cls = " bar" + (c.power_w > CIRCUIT_W ? " over" : c.power_w > CONTINUOUS_W ? " warn" : "");
+    style = `--pct:${Math.min(100, Math.round((c.power_w / CIRCUIT_W) * 100))}`;
   }
   // like a printed panel schedule: circuit numbers sit next to the centre bus, descriptions on the outside
   const parts = [el("span", { class: "room", text: rooms }), el("span", { class: "amps", text: amps }),
@@ -351,7 +356,10 @@ function render() {
   renderStats();
   $("#view-panels").hidden = view !== "panels";
   $("#view-rooms").hidden = view !== "rooms";
-  $("#estKey").hidden = !(f.est && view === "panels");
+  $("#estKey").hidden = view !== "panels";
+  $("#estKey").replaceChildren(...(f.est
+    ? ["bar = actual ÷ estimate · ", el("b", { class: "r", text: "red" }), " = 20%+ over"]
+    : [`bar = load of ${CIRCUIT_W} W · `, el("b", { class: "y", text: "amber" }), ` > ${CONTINUOUS_W} W · `, el("b", { class: "r", text: "red" }), ` > ${CIRCUIT_W} W`]));
   if (view === "panels") renderPanels(f); else renderRooms(f);
 }
 
