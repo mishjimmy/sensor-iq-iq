@@ -63,6 +63,7 @@ class Monitor:
         self.history = history
         self.states: dict[str, PanelState] = {}
         self.grist_map: dict[str, dict[str, Any]] = {}
+        self.anchor_names: dict[str, str] = {}
         self.grist_status: dict[str, Any] = {"enabled": settings.grist_enabled, "last_sync": None,
                                              "last_map": None, "error": None}
         self.updated_at: float | None = None
@@ -119,6 +120,7 @@ class Monitor:
             "summary": summarise(all_circuits),
             "panels": panels,
             "circuit_info": {k: v for k, v in self.grist_map.items() if k in keys},
+            "anchor_names": self.anchor_names,
             "grist": self.grist_status,
             "grist_panels": sorted({v["panel"] for v in self.grist_map.values() if v.get("panel")}),
             "registry_error": self.registry.load_error,
@@ -205,6 +207,10 @@ class Monitor:
     # ---- Grist ---------------------------------------------------------
     async def refresh_grist_map(self) -> None:
         self.grist_map = await self.grist.fetch_map()
+        try:
+            self.anchor_names = await self.grist.fetch_anchor_names()
+        except Exception as e:  # names are cosmetic; keep the circuit map even if this fails
+            log.warning("grist anchor names failed: %s", e)
         self.grist_status["last_map"] = time.time()
         self._notify()
 

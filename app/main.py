@@ -1,11 +1,14 @@
 """SensorIQ panel monitor: read-only dashboard + Grist live circuit status."""
+import hashlib
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .history import History
@@ -77,19 +80,35 @@ async def no_stale_assets(request, call_next):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+_ASSET = re.compile(r'(/static/[\w.-]+\.(?:css|js))(?=["\'])')
+
+
+@lru_cache
+def _asset_version(path: str) -> str:
+    return hashlib.sha1((STATIC / path.removeprefix("/static/")).read_bytes()).hexdigest()[:10]
+
+
+@lru_cache
+def _page(name: str) -> str:
+    """HTML with ?v=<content hash> on every /static asset, so each deploy gets fresh URLs
+    and no cache (Cloudflare edge or browser) can serve an old app.js / styles.css."""
+    html = (STATIC / name).read_text(encoding="utf-8")
+    return _ASSET.sub(lambda m: f"{m.group(1)}?v={_asset_version(m.group(1))}", html)
+
+
 @app.get("/", include_in_schema=False)
 async def index():
-    return FileResponse(STATIC / "index.html")
+    return HTMLResponse(_page("index.html"))
 
 
 @app.get("/panels", include_in_schema=False)
 async def panels_page():
-    return FileResponse(STATIC / "panels.html")
+    return HTMLResponse(_page("panels.html"))
 
 
 @app.get("/stats", include_in_schema=False)
 async def stats_page():
-    return FileResponse(STATIC / "stats.html")
+    return HTMLResponse(_page("stats.html"))
 
 
 @app.get("/healthz", include_in_schema=False)

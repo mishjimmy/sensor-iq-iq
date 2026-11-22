@@ -37,9 +37,17 @@ function matches(c, panel, f) {
   if (f.tripped && c.status !== "tripped") return false;
   if (!f.q) return true;
   const i = info(c);
-  const hay = [c.circuit, "slot " + c.slot, panel.name, panel.room, i && i.rooms.join(" "), i && i.load_types]
+  const hay = [c.circuit, "slot " + c.slot, panel.name, panel.room, i && i.rooms.join(" "), i && (i.anchors || []).join(" "), i && i.load_types]
     .filter(Boolean).join(" ").toLowerCase();
   return hay.includes(f.q);
+}
+
+// dismissed offline-panel alerts, per browser (a convenience; safe if storage is unavailable)
+function loadDismissed() {
+  try { return new Set(JSON.parse(localStorage.getItem("siq.dismissed") || "[]")); } catch { return new Set(); }
+}
+function saveDismissed(set) {
+  try { localStorage.setItem("siq.dismissed", JSON.stringify([...set])); } catch {}
 }
 
 // ---- header ----------------------------------------------------------------
@@ -66,9 +74,34 @@ function renderStats() {
 
   const banners = [];
   if (state.registry_error) banners.push(el("div", { class: "banner err" }, "panels.yaml has an error (using last good config): ", state.registry_error));
-  for (const p of state.panels) {
-    if (p.panel.enabled && p.polled && !p.online)
-      banners.push(el("div", { class: "banner warn" }, `${p.panel.name} (${p.panel.ip}) is unreachable: ${p.last_error || ""} — last seen ${ago(p.last_ok)}`));
+
+  // unreachable-panel alerts: closeable; a dismissal lasts until that panel is back online
+  const dismissed = loadDismissed();
+  let changed = false;
+  for (const p of state.panels) if (p.online && dismissed.delete(p.panel.ip)) changed = true;
+  if (changed) saveDismissed(dismissed);
+  const offline = state.panels.filter((p) => p.panel.enabled && p.polled && !p.online);
+  const shown = offline.filter((p) => !dismissed.has(p.panel.ip));
+  const hidden = offline.length - shown.length;
+  for (const p of shown) {
+    const close = el("button", { class: "banner-close", type: "button", title: "Dismiss until this panel is back online", "aria-label": `Dismiss alert for ${p.panel.name}`, text: "×" });
+    close.addEventListener("click", () => { dismissed.add(p.panel.ip); saveDismissed(dismissed); render(); });
+    banners.push(el("div", { class: "banner warn closable" },
+      el("span", { text: `${p.panel.name} (${p.panel.ip}) is unreachable: ${p.last_error || ""} — last seen ${ago(p.last_ok)}` }), close));
+  }
+  if (shown.length > 1 || hidden) {
+    const bar = el("div", { class: "banner-bar muted" });
+    if (shown.length > 1) {
+      const all = el("button", { class: "linkish", type: "button", text: `Hide all ${shown.length}` });
+      all.addEventListener("click", () => { shown.forEach((p) => dismissed.add(p.panel.ip)); saveDismissed(dismissed); render(); });
+      bar.append(all);
+    }
+    if (hidden) {
+      const show = el("button", { class: "linkish", type: "button", text: "Show" });
+      show.addEventListener("click", () => { saveDismissed(new Set()); render(); });
+      bar.append(el("span", { text: `${shown.length > 1 ? " · " : ""}${hidden} unreachable panel alert${hidden > 1 ? "s" : ""} hidden · ` }), show);
+    }
+    banners.push(bar);
   }
   $("#banners").replaceChildren(...banners);
 
@@ -86,7 +119,7 @@ function slotTile(c, p, f, side) {
   const tip = [
     c.circuit ? `Circuit ${c.circuit}` : `Slot ${c.slot}`, `Slot ${c.slot} · ${c.status}`,
     c.status !== "empty" && c.status !== "offline" ? `${c.current_a.toFixed(2)} A · ${Math.round(c.power_w)} W · ${c.voltage} V` : null,
-    rooms && `Rooms: ${rooms}`, i && i.load_types && `Loads: ${i.load_types}`, i && `Fixtures: ${i.fixture_count}`,
+    rooms && `Rooms: ${rooms}`, i && i.anchors && i.anchors.length && `Anchor: ${i.anchors.join(", ")}`, i && i.load_types && `Loads: ${i.load_types}`, i && `Fixtures: ${i.fixture_count}`,
     c.pole_of && `Pole 2 of slot ${c.pole_of}`, c.breaker_type && c.breaker_type !== "None" && c.breaker_type,
     ...(c.errors || []),
   ].filter(Boolean).join("\n");
@@ -145,65 +178,115 @@ function renderPanels(f) {
 }
 
 // ---- rooms view ------------------------------------------------------------
-function renderRooms(f) {
-  const rooms = new Map();
-  const room = (name) => {
-    if (!rooms.has(name)) rooms.set(name, { name, dedicated: 0, shared: 0, circuits: [], tripped: 0, on: 0 });
-    return rooms.get(name);
-  };
+// Controls live in index.html (outside the re-rendered table) so typing isn't interrupted by live updates.
+const roomsUI = { group: "room", q: "", trips: false, idle: false, sort: { key: "dedicated", dir: -1 } };
+try { Object.assign(roomsUI, JSON.parse(localStorage.getItem("siq.rooms") || "{}")); } catch {}
+const saveRoomsUI = () => { try { localStorage.setItem("siq.rooms", JSON.stringify(roomsUI)); } catch {} };
+
+const GROUPS = {
+  room: { label: "Served room", none: "(not in Grist schedule)", keys: (c, p, i) => (i && i.rooms.length ? i.rooms : null) },
+  anchor: { label: "Anchor", none: "(no anchor)", keys: (c, p, i) => (i && i.anchors && i.anchors.length ? i.anchors : null) },
+  location: { label: "Panel location", none: "(no location set)", keys: (c, p) => (p.panel.room ? [p.panel.room] : null) },
+};
+const anchorName = (code) => (state.anchor_names && state.anchor_names[code]) || "";
+
+function roomGroups(f) {
+  const g = GROUPS[roomsUI.group] || GROUPS.room;
+  const groups = new Map();
   for (const p of state.panels) {
     if (f.panel && p.panel.ip !== f.panel) continue;
     for (const c of p.circuits) {
       if (c.status === "empty" || c.pole_of || !matches(c, p.panel, f)) continue;
-      const i = info(c);
-      const names = i && i.rooms.length ? i.rooms : ["(not in Grist schedule)"];
+      const names = g.keys(c, p, info(c)) || [g.none];
       const shared = names.length > 1;
       for (const n of names) {
-        const r = room(n);
+        if (!groups.has(n)) groups.set(n, { name: n, detail: roomsUI.group === "anchor" ? anchorName(n) : "",
+          dedicated: 0, shared: 0, count: 0, on: 0, tripped: 0, offline: 0, circuits: [] });
+        const r = groups.get(n);
         r[shared ? "shared" : "dedicated"] += c.current_a;
-        r.circuits.push({ c, shared });
-        if (c.status === "tripped") r.tripped++;
+        r.count++; r.circuits.push({ c, shared });
         if (c.status === "on") r.on++;
+        if (c.status === "tripped") r.tripped++;
+        if (c.status === "offline") r.offline++;
       }
     }
   }
-  const rows = [...rooms.values()].sort((a, b) => b.tripped - a.tripped || (b.dedicated + b.shared) - (a.dedicated + a.shared) || a.name.localeCompare(b.name));
+  return [...groups.values()];
+}
+
+const ROOM_COLS = [
+  { key: "name", label: () => GROUPS[roomsUI.group].label, num: false },
+  { key: "detail", label: () => "Name", num: false, only: "anchor" },
+  { key: "dedicated", label: () => "Current", num: true, tip: "Current on circuits that serve only this group" },
+  { key: "shared", label: () => "+ Shared", num: true, tip: "Current on circuits shared with other groups (not double-counted in Current)" },
+  { key: "count", label: () => "Circuits", num: true },
+  { key: "on", label: () => "On", num: true },
+  { key: "tripped", label: () => "Tripped", num: true },
+];
+
+function renderRooms(f) {
+  let rows = roomGroups(f);
+  const q = roomsUI.q.trim().toLowerCase();
+  if (q) rows = rows.filter((r) => (r.name + " " + r.detail).toLowerCase().includes(q));
+  if (roomsUI.trips) rows = rows.filter((r) => r.tripped > 0);
+  if (roomsUI.idle) rows = rows.filter((r) => r.dedicated + r.shared > 0.05 || r.on > 0);
+  const { key, dir } = roomsUI.sort;
+  rows.sort((a, b) => {
+    const va = a[key], vb = b[key];
+    const cmp = typeof va === "string" ? va.localeCompare(vb, undefined, { numeric: true }) : va - vb;
+    return cmp * dir || a.name.localeCompare(b.name, undefined, { numeric: true });
+  });
+
+  const cols = ROOM_COLS.filter((c) => !c.only || c.only === roomsUI.group);
+  const head = cols.map((col) => {
+    const active = key === col.key;
+    const b = el("button", { class: "sort" + (active ? " active" : ""), type: "button", title: col.tip || `Sort by ${col.label()}` },
+      col.label(), el("span", { class: "arrow", text: active ? (dir > 0 ? "▲" : "▼") : "↕" }));
+    b.addEventListener("click", () => {
+      roomsUI.sort = active ? { key, dir: -dir } : { key: col.key, dir: col.num ? -1 : 1 };
+      saveRoomsUI(); render();
+    });
+    return el("th", { class: col.num ? "num" : "", "aria-sort": active ? (dir > 0 ? "ascending" : "descending") : "none" }, b);
+  });
+  const groupWord = { room: "rooms", anchor: "anchors", location: "locations" }[roomsUI.group];
   const chip = ({ c, shared }) => el("span", {
     class: `chip ${c.status}${shared ? " shared" : ""}`,
-    title: `${c.circuit || "slot " + c.slot}: ${c.status}, ${c.current_a.toFixed(2)} A${shared ? " (shared with other rooms)" : ""}`,
+    title: `${c.circuit || "slot " + c.slot}: ${c.status}, ${c.current_a.toFixed(2)} A${shared ? ` (shared with other ${groupWord})` : ""}`,
     text: `${c.circuit || "S" + c.slot} ${c.status === "tripped" ? "TRIP" : c.status === "offline" ? "?" : c.current_a.toFixed(1)}`,
   });
-  const roomTable = el("div", { class: "table-wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, el("th", { text: "Served room" }), el("th", { class: "num", text: "Dedicated" }),
-      el("th", { class: "num", text: "+ Shared" }), el("th", { class: "num", text: "On" }), el("th", { class: "num", text: "Tripped" }),
-      el("th", { text: "Circuits (dashed = shared with other rooms)" }))),
-    el("tbody", {}, rows.length ? rows.map((r) => el("tr", {},
-      el("td", { text: r.name }), el("td", { class: "num", text: fmtA(r.dedicated) }),
-      el("td", { class: "num muted", text: r.shared ? fmtA(r.shared) : "—" }),
-      el("td", { class: "num", text: r.on }), el("td", { class: "num", text: r.tripped || "—" }),
+  const cell = (r, col) => {
+    if (col.key === "name") return el("td", { text: r.name });
+    if (col.key === "detail") return el("td", { class: "muted", text: r.detail });
+    if (col.key === "dedicated") return el("td", { class: "num", text: fmtA(r.dedicated) });
+    if (col.key === "shared") return el("td", { class: "num muted", text: r.shared ? fmtA(r.shared) : "—" });
+    if (col.key === "tripped") return el("td", { class: "num" + (r.tripped ? " trip-num" : ""), text: r.tripped || "—" });
+    return el("td", { class: "num", text: r[col.key] });
+  };
+  const total = rows.reduce((a, r) => a + r.dedicated, 0);
+  const table = el("div", { class: "table-wrap" }, el("table", {},
+    el("thead", {}, el("tr", {}, head, el("th", { text: `Circuits (dashed = shared with other ${groupWord})` }))),
+    el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((col) => cell(r, col)),
       el("td", {}, el("div", { class: "chips" }, r.circuits.map(chip))))) :
-      el("tr", {}, el("td", { colspan: 6, class: "muted", text: "No circuits match." })))));
+      el("tr", {}, el("td", { colspan: cols.length + 1, class: "muted", text: "Nothing matches these filters." })))));
 
-  const loc = new Map();
-  for (const p of state.panels) {
-    if (f.panel && p.panel.ip !== f.panel) continue;
-    const k = p.panel.room || "(no room set)";
-    if (!loc.has(k)) loc.set(k, { name: k, panels: [], a: 0, w: 0, tripped: 0, on: 0 });
-    const r = loc.get(k);
-    r.panels.push(p.panel.name); r.a += p.summary.total_a; r.w += p.summary.total_w;
-    r.tripped += p.summary.counts.tripped; r.on += p.summary.counts.on;
-  }
-  const locTable = el("div", { class: "table-wrap" }, el("table", {},
-    el("thead", {}, el("tr", {}, el("th", { text: "Panel location" }), el("th", { text: "Panels" }), el("th", { class: "num", text: "Current" }),
-      el("th", { class: "num", text: "Power" }), el("th", { class: "num", text: "On" }), el("th", { class: "num", text: "Tripped" }))),
-    el("tbody", {}, [...loc.values()].map((r) => el("tr", {}, el("td", { text: r.name }), el("td", { text: r.panels.join(", ") }),
-      el("td", { class: "num", text: fmtA(r.a) }), el("td", { class: "num", text: fmtW(r.w) }),
-      el("td", { class: "num", text: r.on }), el("td", { class: "num", text: r.tripped || "—" }))))));
+  const needsGrist = roomsUI.group !== "location" && !Object.keys(state.circuit_info).length;
+  $("#rooms-note").replaceChildren(needsGrist ? el("div", { class: "banner warn" },
+    "No Grist circuit map loaded yet, so circuits can't be grouped by room or anchor. Set GRIST_API_KEY / GRIST_SERVER and each panel's Grist panel number.") : "");
+  $("#rooms-count").textContent = `${rows.length} ${groupWord} · ${fmtA(total)} dedicated`;
+  $("#rooms-table").replaceChildren(table);
+}
 
-  const note = Object.keys(state.circuit_info).length ? null :
-    el("div", { class: "banner warn" }, "No Grist circuit→room map loaded yet, so circuits can't be grouped by served room. Set GRIST_API_KEY / GRIST_SERVER and grist_panel per panel.");
-  $("#view-rooms").replaceChildren(note, el("h3", { class: "section", text: "By served room (from Grist panel schedule)" }), roomTable,
-    el("h3", { class: "section", text: "By panel location" }), locTable);
+function wireRoomsControls() {
+  const g = $("#roomGroup"), q = $("#roomQ"), t = $("#roomTrips"), i = $("#roomIdle");
+  g.value = roomsUI.group; q.value = roomsUI.q; t.checked = roomsUI.trips; i.checked = roomsUI.idle;
+  g.addEventListener("change", () => {
+    roomsUI.group = g.value;
+    if (roomsUI.sort.key === "detail" && g.value !== "anchor") roomsUI.sort = { key: "dedicated", dir: -1 };
+    saveRoomsUI(); render();
+  });
+  q.addEventListener("input", () => { roomsUI.q = q.value; saveRoomsUI(); render(); });
+  t.addEventListener("change", () => { roomsUI.trips = t.checked; saveRoomsUI(); render(); });
+  i.addEventListener("change", () => { roomsUI.idle = i.checked; saveRoomsUI(); render(); });
 }
 
 function render() {
@@ -232,6 +315,10 @@ try {
   if (saved.view) view = saved.view;
   if (saved.p) $("#panelFilter").append(el("option", { value: saved.p, text: saved.p })), $("#panelFilter").value = saved.p;
 } catch {}
+// bookmarkable: /?view=rooms&group=anchor
+const params = new URLSearchParams(location.search);
+if (["panels", "rooms"].includes(params.get("view"))) view = params.get("view");
+if (GROUPS[params.get("group")]) roomsUI.group = params.get("group");
 document.querySelectorAll(".tabs button").forEach((b) => {
   b.classList.toggle("active", b.dataset.view === view);
   b.addEventListener("click", () => {
@@ -242,4 +329,5 @@ document.querySelectorAll(".tabs button").forEach((b) => {
 });
 ["#q", "#panelFilter", "#trippedOnly"].forEach((s) => $(s).addEventListener("input", render));
 setInterval(() => state && ($("#updated").textContent = "Updated " + ago(state.updated_at)), 1000);
+wireRoomsControls();
 connect();

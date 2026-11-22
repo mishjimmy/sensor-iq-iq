@@ -34,7 +34,23 @@
       </div>
     </div>
     <section id="view-panels" class="panels"></section>
-    <section id="view-rooms" hidden></section>
+    <section id="view-rooms" hidden>
+      <div class="rooms-controls">
+        <label>Group by
+          <select id="roomGroup">
+            <option value="room">Served room</option>
+            <option value="anchor">Anchor</option>
+            <option value="location">Panel location</option>
+          </select>
+        </label>
+        <input type="search" id="roomQ" placeholder="Filter names…" aria-label="Filter groups by name">
+        <label class="check"><input type="checkbox" id="roomTrips"> Only with trips</label>
+        <label class="check"><input type="checkbox" id="roomIdle"> Hide idle</label>
+        <span class="muted" id="rooms-count"></span>
+      </div>
+      <div id="rooms-note"></div>
+      <div id="rooms-table"></div>
+    </section>
   </main>
   <script src="/static/app.js"></script>
 </body>

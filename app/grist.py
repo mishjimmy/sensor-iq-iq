@@ -15,8 +15,9 @@ log = logging.getLogger(__name__)
 
 CIRCUIT_TABLE = "Panel_Circuit_Live"
 PANEL_TABLE = "Panel_Live"
-MAP_SQL = ("SELECT Circuit, Panel, Circuit_No, Rooms, Load_Types, Fixture_Count "
+MAP_SQL = ("SELECT Circuit, Panel, Circuit_No, Rooms, Anchor, Load_Types, Fixture_Count "
            "FROM Panel_Schedule_Export")
+ANCHOR_SQL = "SELECT ANCHOR_CODE, ANCHOR_NAME FROM Anchors"
 BATCH = 500
 
 
@@ -81,9 +82,21 @@ class GristClient:
                 "panel": f.get("Panel"),
                 "circuit_no": f.get("Circuit_No"),
                 "rooms": split_rooms(f.get("Rooms")),
+                "anchors": split_rooms(f.get("Anchor")),
                 "load_types": f.get("Load_Types") or "",
                 "fixture_count": f.get("Fixture_Count") or 0,
             }
+        return out
+
+    async def fetch_anchor_names(self) -> dict[str, str]:
+        """Anchor code -> display name, e.g. 'MYS' -> 'MYSTERY SCHOOL'."""
+        r = await self.client.get(f"{self.base}/sql", params={"q": ANCHOR_SQL}, headers=self.headers, timeout=30)
+        r.raise_for_status()
+        out = {}
+        for rec in r.json().get("records", []):
+            code = str(rec["fields"].get("ANCHOR_CODE") or "").strip()
+            if code:
+                out[code] = str(rec["fields"].get("ANCHOR_NAME") or "").strip()
         return out
 
     def changed_circuits(self, rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
