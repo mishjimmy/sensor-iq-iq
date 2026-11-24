@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS events (
   old_status TEXT, new_status TEXT
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+CREATE TABLE IF NOT EXISTS status_changes (
+  ts REAL NOT NULL, ip TEXT NOT NULL, panel_name TEXT, slot INTEGER, circuit TEXT,
+  old_status TEXT, new_status TEXT
+);
+CREATE INDEX IF NOT EXISTS status_changes_ts ON status_changes(ts);
 CREATE TABLE IF NOT EXISTS circuit_state (
   ip TEXT NOT NULL, slot INTEGER NOT NULL, status TEXT, since REAL, known INTEGER,
   PRIMARY KEY (ip, slot)
@@ -107,6 +112,7 @@ class History:
         pb = int(now // PANEL_BUCKET) * PANEL_BUCKET
         cb = int(now // CIRCUIT_BUCKET) * CIRCUIT_BUCKET
         events = []
+        changes = []  # every circuit status change (events above keeps only trips, for the stats page)
         with self._lock:
             self._flush_closed(pb, cb)
             for s in samples:
@@ -131,6 +137,8 @@ class History:
                 for c in s.circuits:
                     key = (s.ip, c.slot)
                     prev = self._last_status.get(key)
+                    if prev is not None and prev != c.status:
+                        changes.append((now, s.ip, s.name, c.slot, c.circuit, prev, c.status))
                     # only trips and recoveries; routine on/off switching would bury them
                     if prev is not None and prev != c.status and "tripped" in (prev, c.status):
                         events.append((now, s.ip, s.name, c.slot, c.circuit, prev, c.status))
@@ -148,6 +156,9 @@ class History:
                     ca.on += c.status == "on"
             if events:
                 self._db.executemany("INSERT INTO events VALUES (?,?,?,?,?,?,?)", events)
+            if changes:
+                self._db.executemany("INSERT INTO status_changes VALUES (?,?,?,?,?,?,?)", changes)
+            if events or changes:
                 self._db.commit()
             if now - self._last_prune > 3600:
                 self._prune(now)
@@ -181,7 +192,7 @@ class History:
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.retention_s
-        for table in ("panel_min", "circuit_15m", "events"):
+        for table in ("panel_min", "circuit_15m", "events", "status_changes"):
             self._db.execute(f"DELETE FROM {table} WHERE ts < ?", (cutoff,))
         self._db.commit()
         self._last_prune = now
@@ -199,6 +210,15 @@ class History:
             self._db.executemany("INSERT OR REPLACE INTO circuit_state VALUES (?,?,?,?,?)",
                                  [(ip, slot, st, since, int(known)) for ip, slot, st, since, known in rows])
             self._db.commit()
+
+    def changes_since(self, since: float) -> list[dict[str, Any]]:
+        """Circuit status changes plus panel online/offline changes since `since`, oldest first."""
+        cols = ("ts", "ip", "panel_name", "slot", "circuit", "old", "new")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM status_changes WHERE ts >= ? "
+                "UNION ALL SELECT * FROM events WHERE ts >= ? AND slot = 0 ORDER BY ts", (since, since)).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
 
     # ---- reading -------------------------------------------------------
     def query(self, range_key: str, now: float | None = None) -> dict[str, Any]:

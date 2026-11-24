@@ -171,7 +171,9 @@ Limitations:
 - `GET /api/state`: full JSON snapshot
 - `GET /api/stream`: Server-Sent Events, one snapshot per poll
 - `GET /api/history?range=6h|24h|7d|30d`: aggregated history for the charts
-- `GET /api/report.pdf?tz=America/New_York`: downloads as `SHLPanelStatus_YYYYMMDD_HHMM.pdf` (time in that zone). A plain PDF with each enabled panel and every circuit's status (green = on, red = tripped), 4 panels side by side per page, each panel on one page. It's linked as "Status report (PDF)" on the dashboard. Empty slots and second poles are left out, and unreachable panels show when they were last seen.
+- `GET /api/report.pdf?tz=America/New_York`: downloads as `SHLPanelStatus_YYYYMMDD_HHMM.pdf` (time in that zone). A plain PDF with each enabled panel and every circuit's status (green = on, red = tripped), 4 panels side by side per page, each panel on one page. It's on the Reports page (`/reports`). Empty slots and second poles are left out, and unreachable panels show when they were last seen.
+- `GET /api/report-changes.pdf?tz=America/New_York&hours=24`: downloads as `SHLPanelChanges_YYYYMMDD_HHMM.pdf`. It lists the circuits whose status now differs from their status 24 hours ago (`hours` up to 720), as Was / Now / time of the last change, grouped by panel. A circuit that changed and changed back within the window is left out, and so is a panel that went offline and came back. It's on the Reports page. Changes are stored in the `status_changes` table in the history database and pruned with the rest of the history.
+- `GET /api/report-changelog.pdf?tz=America/New_York&hours=24`: downloads as `SHLPanelChangelog_YYYYMMDD_HHMM.pdf`. It lists every individual status change in the window (Time / Circuit / From / To), plus panel offline/online events, grouped by panel with the newest first. It's on the Reports page.
 - `GET /healthz`: liveness and panel counts
 - `GET /api/panels`: registry
 - `POST /api/panels`, `PUT /api/panels/{ip}`, `DELETE /api/panels/{ip}`: needs the `X-Admin-Token` header

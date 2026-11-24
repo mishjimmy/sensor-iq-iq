@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 
 from . import sensoriq
 from .poller import Monitor, info_summary
-from .report import build_report, report_filename
+from .report import build_changelog_report, build_changes_report, build_report, report_filename
 from .registry import RegistryError
 
 router = APIRouter(prefix="/api")
@@ -75,6 +75,31 @@ async def report_pdf(request: Request, tz: str | None = None) -> Response:
     pdf = await asyncio.to_thread(build_report, snap, tz, now)
     return Response(pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{report_filename(now, tz)}"'})
+
+
+async def _changes_pdf(request: Request, tz: str | None, hours: int, build, prefix: str) -> Response:
+    mon = _monitor(request)
+    if not mon.history:
+        raise HTTPException(503, "history is disabled")
+    hours = max(1, min(hours, 24 * 30))
+    now = time.time()
+    rows = await asyncio.to_thread(mon.history.changes_since, now - hours * 3600)
+    order = [(p.ip, p.name) for p in mon.registry.panels]
+    pdf = await asyncio.to_thread(build, rows, order, tz, now, hours)
+    name = report_filename(now, tz, prefix)
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/report-changes.pdf")
+async def report_changes_pdf(request: Request, tz: str | None = None, hours: int = 24) -> Response:
+    """Circuits whose status now differs from `hours` ago (net changes), grouped by panel."""
+    return await _changes_pdf(request, tz, hours, build_changes_report, "SHLPanelChanges")
+
+
+@router.get("/report-changelog.pdf")
+async def report_changelog_pdf(request: Request, tz: str | None = None, hours: int = 24) -> Response:
+    """Every circuit status change and panel online/offline change in the last `hours`."""
+    return await _changes_pdf(request, tz, hours, build_changelog_report, "SHLPanelChangelog")
 
 
 # ---- panel registry ------------------------------------------------------

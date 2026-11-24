@@ -106,6 +106,11 @@ async def panels_page():
     return HTMLResponse(_page("panels.html"))
 
 
+@app.get("/reports", include_in_schema=False)
+async def reports_page():
+    return HTMLResponse(_page("reports.html"))
+
+
 @app.get("/stats", include_in_schema=False)
 async def stats_page():
     return HTMLResponse(_page("stats.html"))

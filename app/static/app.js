@@ -400,7 +400,5 @@ document.querySelectorAll(".tabs button").forEach((b) => {
 if (params.get("est") === "1") $("#compareEst").checked = true;
 ["#q", "#panelFilter", "#trippedOnly", "#compareEst"].forEach((s) => $(s).addEventListener("input", render));
 setInterval(() => state && ($("#updated").textContent = "Updated " + ago(state.updated_at)), 1000);
-// report timestamps in the viewer's time zone, not the server's
-try { $("#reportLink").href = "/api/report.pdf?tz=" + encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch {}
 wireRoomsControls();
 connect();

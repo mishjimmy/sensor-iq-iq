@@ -64,3 +64,14 @@ def test_retention(tmp_path):
     h._prune(T0 + 2 * 86400)
     assert h.query("30d", now=T0 + 2 * 86400)["series"] == []
     h.close()
+
+
+def test_changes_since_logs_every_status_change(tmp_path):
+    h = History(tmp_path / "h.db")
+    h.record([Sample("10.0.0.12", "P12", "", True, circuits("on"))], now=T0)
+    h.record([Sample("10.0.0.12", "P12", "", True, circuits("off"))], now=T0 + 5)      # on -> off (not a trip)
+    h.record([Sample("10.0.0.12", "P12", "", False, circuits("off"))], now=T0 + 10)    # panel offline
+    rows = h.changes_since(T0 - 1)
+    assert [(r["slot"], r["old"], r["new"]) for r in rows] == [(3, "on", "off"), (0, "online", "offline")]
+    assert h.changes_since(T0 + 6)[0]["slot"] == 0
+    h.close()
