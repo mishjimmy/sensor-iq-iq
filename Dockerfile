@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 
 RUN pip install --no-cache-dir "fastapi==0.115.6" "uvicorn[standard]==0.32.1" "httpx==0.28.1" \
-    "pydantic-settings==2.6.1" "ruamel.yaml==0.18.6"
+    "pydantic-settings==2.6.1" "ruamel.yaml==0.18.6" "fpdf2==2.9.0" "tzdata"
 
 COPY app ./app
 

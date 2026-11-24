@@ -2,13 +2,15 @@
 import asyncio
 import json
 import secrets
+import time
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 
 from . import sensoriq
 from .poller import Monitor, info_summary
+from .report import build_report, report_filename
 from .registry import RegistryError
 
 router = APIRouter(prefix="/api")
@@ -63,6 +65,16 @@ async def history(request: Request, range: str = "24h") -> dict[str, Any]:
     data["circuit_info"] = {k: v for k, v in mon.grist_map.items() if k in keys}
     data["panel_order"] = [p.ip for p in mon.registry.panels]  # stable colour per panel
     return data
+
+
+@router.get("/report.pdf")
+async def report_pdf(request: Request, tz: str | None = None) -> Response:
+    """Plain circuit status report for all enabled panels. tz: IANA zone for timestamps (default UTC)."""
+    snap = _monitor(request).snapshot()
+    now = time.time()
+    pdf = await asyncio.to_thread(build_report, snap, tz, now)
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{report_filename(now, tz)}"'})
 
 
 # ---- panel registry ------------------------------------------------------

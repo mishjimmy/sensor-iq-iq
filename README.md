@@ -169,6 +169,7 @@ Limitations:
 - `GET /api/state`: full JSON snapshot
 - `GET /api/stream`: Server-Sent Events, one snapshot per poll
 - `GET /api/history?range=6h|24h|7d|30d`: aggregated history for the charts
+- `GET /api/report.pdf?tz=America/New_York`: downloads as `SHLPanelStatus_YYYYMMDD_HHMM.pdf` (time in that zone). A plain PDF with each enabled panel and every circuit's status (green = on, red = tripped), 4 panels side by side per page, each panel on one page. It's linked as "Status report (PDF)" on the dashboard. Empty slots and second poles are left out, and unreachable panels show when they were last seen.
 - `GET /healthz`: liveness and panel counts
 - `GET /api/panels`: registry
 - `POST /api/panels`, `PUT /api/panels/{ip}`, `DELETE /api/panels/{ip}`: needs the `X-Admin-Token` header
