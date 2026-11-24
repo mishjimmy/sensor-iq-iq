@@ -74,7 +74,11 @@ async def no_stale_assets(request, call_next):
     """
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/static/") or path in ("/", "/panels", "/stats"):
+    if path.startswith("/api/"):
+        # live data and generated reports: never cache. Cloudflare caches *.pdf by default and kept
+        # serving the first report generated for a given URL.
+        response.headers["Cache-Control"] = "no-store"
+    elif path.startswith("/static/") or path in ("/", "/panels", "/stats", "/reports"):
         response.headers["Cache-Control"] = "no-cache"
     return response
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

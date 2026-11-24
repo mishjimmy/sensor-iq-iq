@@ -19,6 +19,7 @@ document.querySelectorAll("[data-report]").forEach((btn) => btn.addEventListener
   if (tz) params.set("tz", tz);
   const sel = btn.closest(".report-card").querySelector("select.hours");
   if (sel) params.set("hours", sel.value);
+  params.set("_", Date.now());  // unique URL per click, so no cache (browser or Cloudflare) can replay an old report
   // the server names the file (e.g. SHLPanelChanges_20261124_1434.pdf) via Content-Disposition
   location.href = `/api/${btn.dataset.report}.pdf?${params}`;
 }));
