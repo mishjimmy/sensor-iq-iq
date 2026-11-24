@@ -56,6 +56,7 @@ def circuit_fields(c: Circuit, panel_no: int, panel_name: str) -> dict[str, Any]
         "Power_W": round(c.power_w),
         "Voltage": round(c.voltage),
         "Panel_Name": panel_name,
+        "Last_Change": c.changed_at,  # when Status last changed (first-seen time if never observed)
         # everything the panel reported for this slot, verbatim
         "Raw": json.dumps(c.raw, indent=2) if c.raw else "",
     }

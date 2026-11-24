@@ -125,19 +125,21 @@ These were created once and are owned by this service:
 
 | Table | Key | Columns |
 |---|---|---|
-| `Panel_Circuit_Live` | `Circuit` | Panel_No, Circuit_No, Status (on/off/tripped/empty/offline), Current_A, Power_W, Voltage, Panel_Name, Updated_At (last change), Raw (the panel's full `/api/outputs` JSON for the slot) |
+| `Panel_Circuit_Live` | `Circuit` | Panel_No, Circuit_No, Status (on/off/tripped/empty/offline), Current_A, Power_W, Voltage, Panel_Name, Last_Change (when Status last changed), Updated_At (last row write), Raw (the panel's full `/api/outputs` JSON for the slot) |
 | `Panel_Live` | `Panel_No` | Name, IP, Room, Online, Last_Seen, Total_A, Tripped_Count, Errors |
 
 These formula columns were added to existing tables. No existing data is written.
 
 | Table | Column | Shows |
 |---|---|---|
-| `Panel_Schedule_Export` | `Live_Status`, `Live_A`, `Live_Updated`, `Live_Raw` | live state of each circuit, plus the raw panel JSON |
+| `Panel_Schedule_Export` | `Live_Status`, `Live_A`, `Live_Updated`, `Live_Last_Change`, `Live_Raw` | live state of each circuit, plus the raw panel JSON |
 | `Fixture_Schedule` | `Circuit_Live_Status`, `Circuit_Live_A` | live state of the circuit feeding each fixture |
 
 Status shows `no data` until a panel with that `grist_panel` is configured and synced. When a panel stops answering, the service writes `offline` to all of its circuits. Grist formulas can't time out on their own, so this is how staleness shows up there.
 
 `Circuit_Live_A` is the whole circuit's current, shared by every fixture on that circuit.
+
+`Last_Change` is tracked by the service and kept in `circuit_state` in the history database, so it survives restarts. A panel going offline does not count as a change. When a circuit hasn't changed since the service first saw it, the value is that first-seen time, because the real change happened earlier. The dashboard and the PDF mark these with "before" and `*`.
 
 ### Estimated load per circuit (read-only)
 

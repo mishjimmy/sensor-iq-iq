@@ -60,3 +60,51 @@ async def test_registry_edit_remaps_circuits(tmp_path):
     circuits, _ = m.grist_rows()
     assert "1316" in circuits and "1216" not in circuits
     await m.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_last_change_tracking_survives_outage_and_restart(tmp_path):
+    import copy
+
+    from app.history import History
+
+    outputs = copy.deepcopy(OUTPUTS)
+    state = {"down": False}
+
+    def handler(req: httpx.Request):
+        if state["down"] or req.url.host != "10.0.0.12":
+            raise httpx.ConnectTimeout("down")
+        return httpx.Response(200, json=INFO if req.url.path == "/api/info" else outputs)
+
+    f = tmp_path / "panels.yaml"
+    f.write_text("panels:\n  - {name: P12, ip: 10.0.0.12, grist_panel: 12}\n")
+    s = Settings(_env_file=None, panels_file=str(f), offline_after_failures=1)
+    h = History(tmp_path / "h.db")
+    m = Monitor(s, Registry(f), h)
+    m.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    slot = lambda n: next(c for c in m.states["10.0.0.12"].circuits if c.slot == n)  # noqa: E731
+
+    await m.poll_once()
+    first = slot(16).changed_at
+    assert first and not slot(16).change_known                   # first sighting: real change unknown
+
+    state["down"] = True                                           # outage is not a circuit change
+    await m.poll_once()
+    assert slot(16).status == "offline" and slot(16).changed_at == first
+
+    state["down"] = False
+    m.states["10.0.0.12"].failures = 0                             # skip the offline back-off
+    next(o for o in outputs if o["slot"] == 16)["outputStatus"] = "off"
+    await m.poll_once()
+    assert slot(16).status == "off" and slot(16).change_known and slot(16).changed_at >= first
+    assert m.grist_rows()[0]["1216"]["Last_Change"] == slot(16).changed_at
+    changed = slot(16).changed_at
+    await m.client.aclose()
+
+    m2 = Monitor(s, Registry(f), h)                                # restart: loaded from history db
+    m2.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await m2.poll_once()
+    c16 = next(c for c in m2.states["10.0.0.12"].circuits if c.slot == 16)
+    assert c16.changed_at == changed and c16.change_known
+    await m2.client.aclose()
+    h.close()

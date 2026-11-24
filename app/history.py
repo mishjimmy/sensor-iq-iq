@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS events (
   old_status TEXT, new_status TEXT
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+CREATE TABLE IF NOT EXISTS circuit_state (
+  ip TEXT NOT NULL, slot INTEGER NOT NULL, status TEXT, since REAL, known INTEGER,
+  PRIMARY KEY (ip, slot)
+) WITHOUT ROWID;
 """
 
 RANGES = {"6h": 6 * 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
@@ -181,6 +185,20 @@ class History:
             self._db.execute(f"DELETE FROM {table} WHERE ts < ?", (cutoff,))
         self._db.commit()
         self._last_prune = now
+
+    # ---- last status change per circuit (survives restarts) --------------
+    def load_circuit_states(self) -> dict[tuple[str, int], tuple[str, float, bool]]:
+        with self._lock:
+            return {(ip, slot): (status, since, bool(known)) for ip, slot, status, since, known in
+                    self._db.execute("SELECT ip, slot, status, since, known FROM circuit_state")}
+
+    def save_circuit_states(self, rows: list[tuple[str, int, str, float, bool]]) -> None:
+        if not rows:
+            return
+        with self._lock:
+            self._db.executemany("INSERT OR REPLACE INTO circuit_state VALUES (?,?,?,?,?)",
+                                 [(ip, slot, st, since, int(known)) for ip, slot, st, since, known in rows])
+            self._db.commit()
 
     # ---- reading -------------------------------------------------------
     def query(self, range_key: str, now: float | None = None) -> dict[str, Any]:

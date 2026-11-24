@@ -24,6 +24,8 @@ class Circuit:
     breaker_type: str = ""
     pole_of: int | None = None  # set on the 2nd+ slot of a multi-pole breaker
     errors: list[str] = field(default_factory=list)
+    changed_at: float | None = None  # when the status last changed (set by the poller)
+    change_known: bool = False       # False: status unchanged since monitoring began, real change is earlier
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)  # panel's /api/outputs entry
 
     def to_dict(self) -> dict[str, Any]:
@@ -74,7 +76,8 @@ def offline_circuits(previous: list[Circuit], panel_no: int | None, slot_offset:
     """Circuits to report when a panel is unreachable: keep identity, drop readings."""
     if previous:
         return [Circuit(slot=c.slot, circuit_no=c.circuit_no, circuit=c.circuit, status="offline",
-                        breaker_type=c.breaker_type, pole_of=c.pole_of) for c in previous]
+                        breaker_type=c.breaker_type, pole_of=c.pole_of,
+                        changed_at=c.changed_at, change_known=c.change_known) for c in previous]
     return [Circuit(slot=s, circuit_no=s + slot_offset, circuit=circuit_id(panel_no, s + slot_offset), status="offline")
             for s in range(1, slot_count + 1)]
 

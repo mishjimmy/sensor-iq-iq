@@ -73,6 +73,10 @@ class Monitor:
         self.grist = (GristClient(settings.grist_server, settings.grist_doc_id, settings.grist_api_key, self.client)
                       if settings.grist_enabled else None)
         self._tasks: list[asyncio.Task] = []
+        # (ip, slot) -> (status, since, known); "offline" is never recorded, so a panel outage
+        # doesn't count as a circuit change
+        self.last_change: dict[tuple[str, int], tuple[str, float, bool]] = (
+            history.load_circuit_states() if history else {})
         self._sync_states()
 
     # ---- lifecycle -----------------------------------------------------
@@ -159,15 +163,36 @@ class Monitor:
                 st.online = False
                 st.circuits = offline_circuits(st.circuits, p.grist_panel, p.slot_offset,
                                                st.info.get("slot_count") or 48)
+                await self._stamp_changes(st)
             st.polled = True
             return
         st.info = info_summary(info)
         st.circuits = normalise_outputs(outputs, p.grist_panel, p.slot_offset)
+        await self._stamp_changes(st)
         st.online = True
         st.polled = True
         st.failures = 0
         st.last_error = None
         st.last_ok = time.time()
+
+    async def _stamp_changes(self, st: PanelState) -> None:
+        """Set each circuit's changed_at from the last time its status was seen to change."""
+        now = time.time()
+        changed = []
+        for c in st.circuits:
+            key = (st.panel.ip, c.slot)
+            e = self.last_change.get(key)
+            if c.status != "offline" and (e is None or e[0] != c.status):
+                # first sighting: the real change happened before we were watching
+                e = self.last_change[key] = (c.status, now, e is not None)
+                changed.append((*key, *e))
+            if e:
+                c.changed_at, c.change_known = e[1], e[2]
+        if changed and self.history:
+            try:
+                await asyncio.to_thread(self.history.save_circuit_states, changed)
+            except Exception:
+                log.exception("saving circuit last-change failed")
 
     async def poll_once(self) -> None:
         if self.registry.reload_if_changed():

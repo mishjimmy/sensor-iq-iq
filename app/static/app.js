@@ -19,6 +19,7 @@ function el(tag, attrs = {}, ...children) {
 
 const fmtA = (a) => (a >= 100 ? a.toFixed(0) : a.toFixed(1)) + " A";
 const fmtW = (w) => (w >= 1000 ? (w / 1000).toFixed(2) + " kW" : Math.round(w) + " W");
+const fmtWhen = (ts) => new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 function ago(ts) {
   if (!ts) return "never";
   const s = Math.max(0, Date.now() / 1000 - ts);
@@ -161,6 +162,9 @@ function slotTile(c, p, f, side) {
     c.circuit ? `Circuit ${c.circuit}` : `Slot ${c.slot}`, `Slot ${c.slot} · ${c.status}`,
     c.status !== "empty" && c.status !== "offline" ? `${c.current_a.toFixed(2)} A · ${Math.round(c.power_w)} W · ${c.voltage} V` : null,
     rooms && `Rooms: ${rooms}`, i && i.anchors && i.anchors.length && `Anchor: ${i.anchors.join(", ")}`, i && i.load_types && `Loads: ${i.load_types}`, i && `Fixtures: ${i.fixture_count}`,
+    c.changed_at && c.status !== "empty" && (c.change_known
+      ? `Last change: ${fmtWhen(c.changed_at)}`
+      : `Last change: before ${fmtWhen(c.changed_at)} (unchanged since monitoring began)`),
     ...estTip(c),
     c.pole_of && `Pole 2 of slot ${c.pole_of}`, c.breaker_type && c.breaker_type !== "None" && c.breaker_type,
     ...(c.errors || []),
